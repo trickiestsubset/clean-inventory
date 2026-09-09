@@ -917,8 +917,6 @@
   function renderParts() {
     var params = new URLSearchParams(window.location.hash.split("?")[1] || "");
     var q = (params.get("q") || "").trim().toLowerCase();
-    var list = state.parts.slice().sort(function (a, b) { return a.name.localeCompare(b.name); });
-    if (q) list = list.filter(function (p) { return ((p.name || "") + " " + (p.sku || "") + " " + (p.description || "")).toLowerCase().indexOf(q) !== -1; });
 
     var html = '<h1>Parts catalog</h1>' +
       '<form class="form-row" data-form="partSearch" style="margin:16px 0;">' +
@@ -926,18 +924,22 @@
         '<button class="btn btn-accent" type="submit" style="flex:0 0 auto;">Search</button>' +
       '</form>';
 
-    if (!list.length) {
-      html += '<p class="empty-state">No parts match.</p>';
-    } else {
-      html += '<div class="grid-cards" style="grid-template-columns:repeat(auto-fill,minmax(240px,1fr)); margin-bottom:24px;">' + list.map(function (p) {
-        return '<a href="#/parts/' + p.id + '" class="part-card">' +
-          (p.photoDataUrl ? '<img class="thumb" src="' + p.photoDataUrl + '" alt="" />' : '<div class="thumb-empty">—</div>') +
-          '<div style="min-width:0; flex:1;">' +
-            '<div class="ledger-title-row"><span class="ledger-name">' + esc(p.name) + '</span><span class="part-total">' + totalForPart(p.id) + '</span></div>' +
-            (p.sku ? '<div class="ledger-sku">SKU ' + esc(p.sku) + '</div>' : '') +
-          '</div>' +
-        '</a>';
-      }).join("") + '</div>';
+    if (q) {
+      var list = state.parts.slice().sort(function (a, b) { return a.name.localeCompare(b.name); })
+        .filter(function (p) { return ((p.name || "") + " " + (p.sku || "") + " " + (p.description || "")).toLowerCase().indexOf(q) !== -1; });
+      if (!list.length) {
+        html += '<p class="empty-state">No parts match.</p>';
+      } else {
+        html += '<div class="grid-cards" style="grid-template-columns:repeat(auto-fill,minmax(240px,1fr)); margin-bottom:24px;">' + list.map(function (p) {
+          return '<a href="#/parts/' + p.id + '" class="part-card">' +
+            (p.photoDataUrl ? '<img class="thumb" src="' + p.photoDataUrl + '" alt="" />' : '<div class="thumb-empty">—</div>') +
+            '<div style="min-width:0; flex:1;">' +
+              '<div class="ledger-title-row"><span class="ledger-name">' + esc(p.name) + '</span><span class="part-total">' + totalForPart(p.id) + '</span></div>' +
+              (p.sku ? '<div class="ledger-sku">SKU ' + esc(p.sku) + '</div>' : '') +
+            '</div>' +
+          '</a>';
+        }).join("") + '</div>';
+      }
     }
 
     html += '<div class="panel">' +
