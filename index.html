@@ -333,6 +333,16 @@
     </button>
   </div>
 
+  <div class="scan-modal-backdrop" id="cycle-modal" hidden>
+    <div class="scan-modal">
+      <div class="scan-modal-head">
+        <h2 style="font-size:1em;">Cycle count</h2>
+        <button class="btn btn-ghost btn-sm" id="cycle-close" type="button">Close</button>
+      </div>
+      <div id="cycle-body"></div>
+    </div>
+  </div>
+
   <div class="scan-modal-backdrop" id="flow-modal" hidden>
     <div class="scan-modal">
       <div class="scan-modal-head">
@@ -719,25 +729,37 @@
   }
 
   // ---------- cycle count ----------
-  // Spot-checks a random in-stock location+part pair: tells the user what to go look for,
-  // and corrects the recorded quantity to match what's actually counted on the shelf.
-  function pickCycleCountTarget() {
+  // Spot-checks a random location+part pair against what's actually on the shelf, and
+  // corrects the recorded quantity to match. Draws from every inventory row that still has
+  // a valid location and part — not just rows with quantity > 0 — since confirming a
+  // location is correctly empty is just as much a cycle count as confirming it isn't.
+  function pickCycleCountTarget(exclude) {
     var candidates = state.inventory.filter(function (i) {
-      return i.quantity > 0 && getLocationById(i.locationId) && getPart(i.partId);
+      return getLocationById(i.locationId) && getPart(i.partId);
     });
     if (!candidates.length) return null;
+    if (exclude && candidates.length > 1) {
+      var narrowed = candidates.filter(function (i) {
+        return !(i.locationId === exclude.locationId && i.partId === exclude.partId);
+      });
+      if (narrowed.length) candidates = narrowed;
+    }
     return candidates[Math.floor(Math.random() * candidates.length)];
   }
 
   function startCycleCount() {
-    var target = pickCycleCountTarget();
+    var target = pickCycleCountTarget(cycleCount);
     if (!target) {
-      toast("Nothing is currently stocked anywhere to count.", true);
-      cycleCount = null;
-    } else {
-      cycleCount = { locationId: target.locationId, partId: target.partId };
+      toast("Nothing is stocked anywhere yet to count.", true);
+      return;
     }
-    render();
+    cycleCount = { locationId: target.locationId, partId: target.partId };
+    renderCycleModal();
+  }
+
+  function closeCycleModal() {
+    cycleCount = null;
+    document.getElementById("cycle-modal").hidden = true;
   }
 
   function applyCycleCount(locationId, partId, actualQty) {
@@ -764,34 +786,45 @@
     var qty = Math.round(Number(rawQty));
     if (isNaN(qty) || qty < 0) { toast("Enter a quantity of 0 or more.", true); return; }
     applyCycleCount(cycleCount.locationId, cycleCount.partId, qty).then(function (ok) {
-      if (ok) { cycleCount = null; render(); }
+      if (ok) closeCycleModal();
     });
   }
 
   function renderCycleCountBox() {
-    var html = '<div class="panel" style="margin-bottom:22px;">' +
-      '<div class="section-title" style="margin-top:0;">Cycle count</div>';
+    return '<div class="panel" style="margin-bottom:22px;">' +
+      '<div class="section-title" style="margin-top:0;">Cycle count</div>' +
+      '<button class="btn btn-accent" type="button" id="cycle-start">Start a cycle count</button>' +
+    '</div>';
+  }
 
-    if (!cycleCount) {
-      html += '<p class="hint" style="margin:0 0 12px;">Spot-check a random location and part against what’s actually on the shelf.</p>' +
-        '<button class="btn btn-accent" type="button" id="cycle-start">Start a cycle count</button>';
-    } else {
-      var loc = getLocationById(cycleCount.locationId);
-      var part = getPart(cycleCount.partId);
-      if (!loc || !part) {
-        html += '<p class="hint" style="margin:0 0 12px;">That location or part is no longer available.</p>' +
-          '<button class="btn btn-accent" type="button" id="cycle-start">Start a cycle count</button>';
-      } else {
-        html += '<p style="margin:0 0 12px;">Go check <strong>' + esc(part.name) + '</strong> at <strong>' + esc(loc.name) + '</strong>.</p>' +
-          '<div class="form-row">' +
-            '<input type="number" id="cycle-qty-input" min="0" placeholder="Actual quantity found" />' +
-            '<button class="btn btn-accent" type="button" id="cycle-submit" style="flex:0 0 auto;">Save count</button>' +
-          '</div>' +
-          '<button class="btn btn-ghost btn-sm" type="button" id="cycle-skip" style="margin-top:10px;">Skip to a different one</button>';
-      }
+  function renderCycleModal() {
+    var modal = document.getElementById("cycle-modal");
+    if (!cycleCount) { modal.hidden = true; return; }
+    var loc = getLocationById(cycleCount.locationId);
+    var part = getPart(cycleCount.partId);
+    modal.hidden = false;
+    if (!loc || !part) {
+      document.getElementById("cycle-body").innerHTML = '<p class="hint">That location or part is no longer available.</p>';
+      return;
     }
-    html += '</div>';
-    return html;
+    document.getElementById("cycle-body").innerHTML =
+      '<p style="margin:0 0 12px;">Run cycle count of <strong>' + esc(part.name) + '</strong> at <strong>' + esc(loc.name) + '</strong>.</p>' +
+      '<div class="form-row">' +
+        '<input type="number" id="cycle-qty-input" min="0" placeholder="Actual Quantity" />' +
+        '<button class="btn btn-accent" type="button" id="cycle-submit" style="flex:0 0 auto;">Save count</button>' +
+      '</div>' +
+      '<button class="btn btn-accent btn-sm" type="button" id="cycle-skip" style="margin-top:10px;">Skip</button>';
+    wireCycleModal();
+  }
+
+  function wireCycleModal() {
+    var submitBtn = document.getElementById("cycle-submit");
+    if (submitBtn) submitBtn.addEventListener("click", function () {
+      var input = document.getElementById("cycle-qty-input");
+      submitCycleCount(input ? input.value : "");
+    });
+    var skipBtn = document.getElementById("cycle-skip");
+    if (skipBtn) skipBtn.addEventListener("click", startCycleCount);
   }
 
   function renderPrintLabels() {
@@ -1301,6 +1334,11 @@
     if (e.target.id === "flow-modal") closeFlow();
   });
 
+  document.getElementById("cycle-close").addEventListener("click", closeCycleModal);
+  document.getElementById("cycle-modal").addEventListener("click", function (e) {
+    if (e.target.id === "cycle-modal") closeCycleModal();
+  });
+
   // ---------- event delegation ----------
   document.getElementById("view").addEventListener("submit", function (e) {
     var form = e.target.closest("form[data-form]");
@@ -1380,12 +1418,7 @@
       openPullFlow(pullBtn.dataset.pull, qty);
       return;
     }
-    if (e.target.id === "cycle-start" || e.target.id === "cycle-skip") { startCycleCount(); return; }
-    if (e.target.id === "cycle-submit") {
-      var cycleInput = document.getElementById("cycle-qty-input");
-      submitCycleCount(cycleInput ? cycleInput.value : "");
-      return;
-    }
+    if (e.target.id === "cycle-start") { startCycleCount(); return; }
     var delLocBtn = e.target.closest("[data-delete-location]");
     if (delLocBtn) { deleteLocation(delLocBtn.dataset.deleteLocation); return; }
   });
