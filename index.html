@@ -729,13 +729,12 @@
   }
 
   // ---------- cycle count ----------
-  // Spot-checks a random location+part pair against what's actually on the shelf, and
-  // corrects the recorded quantity to match. Draws from every inventory row that still has
-  // a valid location and part — not just rows with quantity > 0 — since confirming a
-  // location is correctly empty is just as much a cycle count as confirming it isn't.
+  // Spot-checks a random in-stock location+part pair against what's actually on the shelf,
+  // and corrects the recorded quantity to match. Only draws from rows with quantity > 0 —
+  // that's the intended scope, not a bug: cycle counts verify what's supposed to be there.
   function pickCycleCountTarget(exclude) {
     var candidates = state.inventory.filter(function (i) {
-      return getLocationById(i.locationId) && getPart(i.partId);
+      return i.quantity > 0 && getLocationById(i.locationId) && getPart(i.partId);
     });
     if (!candidates.length) return null;
     if (exclude && candidates.length > 1) {
@@ -750,7 +749,7 @@
   function startCycleCount() {
     var target = pickCycleCountTarget(cycleCount);
     if (!target) {
-      toast("Nothing is stocked anywhere yet to count.", true);
+      toast("Nothing is currently stocked anywhere to count.", true);
       return;
     }
     cycleCount = { locationId: target.locationId, partId: target.partId };
