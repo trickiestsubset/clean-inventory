@@ -1,0 +1,1138 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1"><style>:root{color-scheme:light}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#faf9f5;color:#141413}img{max-width:100%}[hidden]:not([hidden=until-found]){display:none!important}</style></head><body>
+<title>Clean Inventory</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600;700&display=swap">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.4.0/jsQR.js"></script>
+<style>
+  :root {
+    --bg: #f2f3ef;
+    --surface: #ffffff;
+    --surface-2: #eceee9;
+    --ink: #1b1f1c;
+    --muted: #5c655e;
+    --faint: #8a9189;
+    --line: #d8dcd4;
+    --accent: #c9670f;
+    --accent-ink: #ffffff;
+    --accent-wash: #f5e2cd;
+    --danger: #ab3427;
+    --danger-wash: #f8e2de;
+    --good: #3d7a44;
+    --radius-sm: 4px;
+    --radius: 8px;
+    --shadow: 0 1px 2px rgba(20, 24, 20, 0.06), 0 1px 1px rgba(20, 24, 20, 0.04);
+    --font-body: "IBM Plex Sans", system-ui, sans-serif;
+    --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #15170f;
+      --surface: #1d201a;
+      --surface-2: #262a21;
+      --ink: #edeee7;
+      --muted: #a3ab9c;
+      --faint: #737a6d;
+      --line: #343a2d;
+      --accent: #ef9a3c;
+      --accent-ink: #1b1400;
+      --accent-wash: #3a2c14;
+      --danger: #e08277;
+      --danger-wash: #3a201c;
+      --good: #7cbf7f;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #15170f;
+    --surface: #1d201a;
+    --surface-2: #262a21;
+    --ink: #edeee7;
+    --muted: #a3ab9c;
+    --faint: #737a6d;
+    --line: #343a2d;
+    --accent: #ef9a3c;
+    --accent-ink: #1b1400;
+    --accent-wash: #3a2c14;
+    --danger: #e08277;
+    --danger-wash: #3a201c;
+    --good: #7cbf7f;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--font-body);
+    font-size: 15px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+  h1, h2, h3 { font-weight: 600; text-wrap: balance; margin: 0; }
+  a { color: inherit; }
+  button, input, select, textarea { font-family: inherit; font-size: inherit; color: inherit; }
+  input, select, textarea {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    padding: 0.55em 0.7em;
+  }
+  input:focus, select:focus, textarea:focus {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+  }
+  button { cursor: pointer; }
+  .btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 0.4em;
+    border: 1px solid transparent; border-radius: var(--radius-sm);
+    padding: 0.55em 0.9em; font-weight: 600; font-size: 0.92em;
+    background: var(--surface-2); color: var(--ink);
+  }
+  .btn:hover { filter: brightness(1.04); }
+  .btn:active { transform: translateY(1px); }
+  .btn-accent { background: var(--accent); color: var(--accent-ink); }
+  .btn-ink { background: var(--ink); color: var(--bg); }
+  .btn-ghost { background: transparent; border-color: var(--line); }
+  .btn-sm { padding: 0.35em 0.6em; font-size: 0.85em; }
+  .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  .label-eyebrow {
+    font-family: var(--font-mono); font-size: 0.72em; letter-spacing: 0.09em;
+    text-transform: uppercase; color: var(--muted);
+  }
+  .qty {
+    font-family: var(--font-mono); font-variant-numeric: tabular-nums;
+    font-weight: 600;
+  }
+  .qty-stencil {
+    display: inline-flex; align-items: center; justify-content: center;
+    min-width: 2.6em; padding: 0.25em 0.4em;
+    border: 1.5px solid var(--ink); border-radius: var(--radius-sm);
+    font-family: var(--font-mono); font-weight: 700; font-size: 1.05em;
+    font-variant-numeric: tabular-nums;
+  }
+  .qty-zero { color: var(--faint); border-color: var(--line); }
+
+  #gate {
+    min-height: 100vh; display: flex; align-items: center; justify-content: center;
+    padding: 24px; background:
+      linear-gradient(var(--bg), var(--bg)),
+      repeating-linear-gradient(45deg, var(--surface-2) 0, var(--surface-2) 1px, transparent 1px, transparent 14px);
+  }
+  .gate-card {
+    width: 100%; max-width: 340px; background: var(--surface);
+    border: 1px solid var(--line); border-radius: var(--radius);
+    box-shadow: var(--shadow); padding: 28px 26px;
+  }
+  .gate-mark {
+    font-family: var(--font-mono); font-weight: 700; letter-spacing: 0.02em;
+    font-size: 1.3em; display: flex; align-items: center; gap: 0.4em; margin-bottom: 4px;
+  }
+  .gate-mark .dot { width: 0.55em; height: 0.55em; border-radius: 2px; background: var(--accent); display: inline-block; }
+  .gate-sub { color: var(--muted); font-size: 0.9em; margin: 0 0 20px; }
+  .gate-error { color: var(--danger); font-size: 0.85em; margin-top: 10px; min-height: 1.2em; }
+
+  header.app-header {
+    position: sticky; top: 0; z-index: 5;
+    background: var(--surface); border-bottom: 1px solid var(--line);
+  }
+  .header-inner {
+    max-width: 900px; margin: 0 auto; padding: 0 18px;
+    height: 56px; display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  }
+  .wordmark {
+    font-family: var(--font-mono); font-weight: 700; font-size: 1.02em;
+    display: flex; align-items: center; gap: 0.45em; text-decoration: none; white-space: nowrap;
+  }
+  .wordmark .dot { width: 0.5em; height: 0.5em; border-radius: 2px; background: var(--accent); display: inline-block; }
+  nav.main-nav { display: flex; gap: 4px; align-items: center; }
+  nav.main-nav a, nav.main-nav button {
+    font-size: 0.88em; padding: 0.5em 0.7em; border-radius: var(--radius-sm);
+    text-decoration: none; color: var(--muted); background: none; border: none; font-weight: 600;
+  }
+  nav.main-nav a.active, nav.main-nav a:hover, nav.main-nav button:hover { color: var(--ink); background: var(--surface-2); }
+
+  main.app-main { max-width: 900px; margin: 0 auto; padding: 28px 18px 80px; }
+  .view-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 18px; flex-wrap: wrap; }
+  .crumb { color: var(--muted); font-size: 0.85em; margin-bottom: 6px; }
+  .crumb a:hover { color: var(--ink); text-decoration: underline; }
+  .section-title {
+    font-family: var(--font-mono); font-size: 0.75em; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--muted); margin: 28px 0 10px;
+  }
+  .section-title:first-child { margin-top: 0; }
+
+  .panel {
+    background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
+    padding: 18px;
+  }
+  .form-grid { display: grid; gap: 10px; }
+  .form-row { display: flex; gap: 8px; flex-wrap: wrap; }
+  .form-row > * { flex: 1; min-width: 140px; }
+  .hint { color: var(--faint); font-size: 0.82em; }
+  .msg-banner {
+    border-radius: var(--radius-sm); padding: 10px 14px; font-size: 0.9em; margin-bottom: 16px;
+    background: var(--danger-wash); color: var(--danger); border: 1px solid color-mix(in srgb, var(--danger) 35%, transparent);
+  }
+
+  .ledger { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+  .ledger-row {
+    display: flex; gap: 14px; align-items: center; padding: 12px 4px;
+    border-bottom: 1px solid var(--line);
+  }
+  .ledger-row:first-child { border-top: 1px solid var(--line); }
+  .thumb {
+    width: 48px; height: 48px; border-radius: var(--radius-sm); object-fit: cover; flex-shrink: 0;
+    border: 1px solid var(--line); background: var(--surface-2);
+  }
+  .thumb-empty {
+    width: 48px; height: 48px; border-radius: var(--radius-sm); flex-shrink: 0;
+    border: 1px dashed var(--line); background: var(--surface-2);
+    display: flex; align-items: center; justify-content: center; color: var(--faint); font-size: 1.3em;
+  }
+  .ledger-main { flex: 1; min-width: 0; }
+  .ledger-title-row { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+  .ledger-name { font-weight: 600; text-decoration: none; }
+  .ledger-name:hover { text-decoration: underline; }
+  .ledger-sku { color: var(--faint); font-family: var(--font-mono); font-size: 0.78em; }
+  .ledger-actions { display: flex; gap: 6px; margin-top: 8px; }
+  .qty-input { width: 3.6em; padding: 0.35em 0.5em; text-align: center; font-family: var(--font-mono); }
+
+  .grid-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 14px; }
+  .loc-card {
+    background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
+    padding: 16px; display: flex; flex-direction: column; align-items: center; text-align: center; gap: 8px;
+    text-decoration: none;
+  }
+  .loc-card:hover { border-color: var(--accent); }
+  .qr-box { background: #fff; padding: 8px; border-radius: var(--radius-sm); border: 1px solid var(--line); }
+  .loc-name { font-weight: 600; }
+  .loc-notes { color: var(--muted); font-size: 0.85em; }
+
+  .part-card {
+    display: flex; gap: 12px; background: var(--surface); border: 1px solid var(--line);
+    border-radius: var(--radius); padding: 14px; text-decoration: none;
+  }
+  .part-card:hover { border-color: var(--accent); }
+  .part-total { font-family: var(--font-mono); font-weight: 700; white-space: nowrap; }
+
+  .empty-state { color: var(--muted); font-size: 0.92em; padding: 18px 4px; }
+
+  .toast-wrap { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); z-index: 50; display: flex; flex-direction: column; gap: 8px; align-items: center; }
+  .toast {
+    background: var(--ink); color: var(--bg); padding: 10px 16px; border-radius: var(--radius-sm);
+    font-size: 0.88em; box-shadow: var(--shadow); animation: toast-in 0.15s ease-out;
+  }
+  .toast.err { background: var(--danger); color: #fff; }
+  @keyframes toast-in { from { opacity: 0; transform: translateY(6px);} to { opacity:1; transform: translateY(0);} }
+
+  .activity-list { list-style: none; margin: 0; padding: 0; }
+  .activity-row { display: flex; justify-content: space-between; gap: 10px; padding: 7px 0; border-bottom: 1px solid var(--line); font-size: 0.87em; }
+  .activity-row:last-child { border-bottom: none; }
+  .activity-delta { font-family: var(--font-mono); font-weight: 700; }
+  .activity-delta.pos { color: var(--good); }
+  .activity-delta.neg { color: var(--danger); }
+
+  .photo-input-row { display: flex; align-items: center; gap: 10px; }
+  .photo-preview { width: 44px; height: 44px; border-radius: var(--radius-sm); object-fit: cover; border: 1px solid var(--line); display: none; }
+
+  [hidden] { display: none !important; }
+
+  .scan-fab-wrap {
+    position: fixed; left: 0; right: 0; bottom: 18px; z-index: 40;
+    display: flex; justify-content: center; pointer-events: none;
+  }
+  .scan-fab {
+    pointer-events: auto;
+    display: inline-flex; align-items: center; gap: 0.5em;
+    background: var(--ink); color: var(--bg); border: none;
+    border-radius: 999px; padding: 0.7em 1.1em 0.7em 0.9em;
+    font-weight: 600; font-size: 0.9em; box-shadow: var(--shadow);
+  }
+  .scan-fab:hover { filter: brightness(1.1); }
+  .scan-fab svg { width: 1.2em; height: 1.2em; flex-shrink: 0; }
+
+  .scan-modal-backdrop {
+    position: fixed; inset: 0; z-index: 60; background: rgba(10, 12, 8, 0.6);
+    display: flex; align-items: center; justify-content: center; padding: 20px;
+  }
+  .scan-modal {
+    width: 100%; max-width: 420px; background: var(--surface); border: 1px solid var(--line);
+    border-radius: var(--radius); padding: 18px; box-shadow: var(--shadow);
+  }
+  .scan-modal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+  .scan-video-wrap {
+    position: relative; border-radius: var(--radius-sm); overflow: hidden;
+    background: #000; aspect-ratio: 1 / 1;
+  }
+  .scan-video-wrap video { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .scan-reticle {
+    position: absolute; inset: 14%; border: 2px solid rgba(255,255,255,0.75); border-radius: 12px;
+    box-shadow: 0 0 0 999px rgba(0,0,0,0.25);
+  }
+  .scan-status { margin: 12px 0 0; font-size: 0.85em; color: var(--muted); min-height: 1.3em; }
+  .scan-manual { display: flex; gap: 8px; margin-top: 12px; }
+  .scan-manual input { flex: 1; }
+
+  @media print {
+    header.app-header, .no-print { display: none !important; }
+    body { background: #fff; }
+    main.app-main { padding: 0; max-width: none; }
+    .print-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
+    .print-tile { break-inside: avoid; text-align: center; border: 1px dashed #999; padding: 14px; }
+  }
+</style>
+
+<div id="gate">
+  <div class="gate-card">
+    <div class="gate-mark"><span class="dot"></span>Clean Inventory</div>
+    <p class="gate-sub">Enter the shared passcode to open the shop inventory.</p>
+    <form id="gate-form" class="form-grid">
+      <input id="gate-input" type="password" placeholder="Passcode" autocomplete="off" autofocus required />
+      <button type="submit" class="btn btn-accent">Unlock</button>
+      <div class="gate-error" id="gate-error"></div>
+    </form>
+  </div>
+</div>
+
+<div id="app" hidden>
+  <header class="app-header">
+    <div class="header-inner">
+      <a href="#/" class="wordmark"><span class="dot"></span>Clean Inventory</a>
+      <nav class="main-nav" id="main-nav">
+        <a href="#/" data-route="">Search</a>
+        <a href="#/locations" data-route="locations">Locations</a>
+        <a href="#/parts" data-route="parts">Parts</a>
+      </nav>
+    </div>
+  </header>
+  <main class="app-main" id="view"></main>
+
+  <div class="scan-fab-wrap">
+    <button class="scan-fab" id="scan-fab" type="button">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/>
+        <path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/>
+        <rect x="7" y="7" width="10" height="10" rx="1"/>
+      </svg>
+      Scan location
+    </button>
+  </div>
+
+  <div class="scan-modal-backdrop" id="scan-modal" hidden>
+    <div class="scan-modal">
+      <div class="scan-modal-head">
+        <h2 style="font-size:1em;">Scan a location's QR code</h2>
+        <button class="btn btn-ghost btn-sm" id="scan-close" type="button">Close</button>
+      </div>
+      <div class="scan-video-wrap">
+        <video id="scan-video" playsinline autoplay muted></video>
+        <div class="scan-reticle"></div>
+      </div>
+      <p class="scan-status" id="scan-status">Requesting camera access…</p>
+      <form class="scan-manual" id="scan-manual-form">
+        <input type="text" id="scan-manual-input" placeholder="Or type the location code" autocomplete="off" />
+        <button class="btn btn-ink btn-sm" type="submit">Go</button>
+      </form>
+    </div>
+  </div>
+</div>
+
+<div class="toast-wrap" id="toasts"></div>
+
+<script>
+(function () {
+  "use strict";
+
+  // ---------- passcode gate ----------
+  var PASSCODE_HASH = "531941412d8078d64acb9e3d42a0e71bfd9db32ce9797ff6d77b9f20f650d67f"; // sha256("rjinv0027")
+  var UNLOCK_KEY = "ci_unlocked_v1";
+
+  function sha256Hex(text) {
+    var enc = new TextEncoder().encode(text);
+    return crypto.subtle.digest("SHA-256", enc).then(function (buf) {
+      return Array.from(new Uint8Array(buf)).map(function (b) { return b.toString(16).padStart(2, "0"); }).join("");
+    });
+  }
+
+  function showApp() {
+    document.getElementById("gate").hidden = true;
+    var app = document.getElementById("app");
+    app.hidden = false;
+    boot();
+  }
+
+  document.getElementById("gate-form").addEventListener("submit", function (e) {
+    e.preventDefault();
+    var val = document.getElementById("gate-input").value;
+    sha256Hex(val).then(function (hash) {
+      if (hash === PASSCODE_HASH) {
+        try { localStorage.setItem(UNLOCK_KEY, "1"); } catch (e) {}
+        showApp();
+      } else {
+        document.getElementById("gate-error").textContent = "That passcode isn't right. Try again.";
+      }
+    });
+  });
+
+  var alreadyUnlocked = false;
+  try { alreadyUnlocked = localStorage.getItem(UNLOCK_KEY) === "1"; } catch (e) {}
+  if (alreadyUnlocked) showApp();
+
+  // ---------- app state ----------
+  var db = null;
+  var state = {
+    locations: [],
+    parts: [],
+    inventory: [],
+    ready: { locations: false, parts: false, inventory: false }
+  };
+
+  function isReady() { return state.ready.locations && state.ready.parts && state.ready.inventory; }
+
+  function toast(msg, isErr) {
+    var wrap = document.getElementById("toasts");
+    var el = document.createElement("div");
+    el.className = "toast" + (isErr ? " err" : "");
+    el.textContent = msg;
+    wrap.appendChild(el);
+    setTimeout(function () { el.remove(); }, 3200);
+  }
+
+  function esc(s) {
+    return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
+      return ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c];
+    });
+  }
+
+  function genCode(len) {
+    var chars = "abcdefghjkmnpqrstuvwxyz23456789";
+    var s = "";
+    for (var i = 0; i < (len || 6); i++) s += chars[Math.floor(Math.random() * chars.length)];
+    return s;
+  }
+
+  function locationUrl(code) {
+    var url = new URL(window.location.href);
+    url.hash = "#/l/" + code;
+    return url.toString();
+  }
+
+  // ---------- data helpers ----------
+  function getLocationByCode(code) {
+    return state.locations.find(function (l) { return l.code === code; });
+  }
+  function getPart(id) {
+    return state.parts.find(function (p) { return p.id === id; });
+  }
+  function invRow(locationId, partId) {
+    return state.inventory.find(function (i) { return i.locationId === locationId && i.partId === partId; });
+  }
+  function inventoryForLocation(locationId) {
+    return state.inventory
+      .filter(function (i) { return i.locationId === locationId && i.quantity > 0; })
+      .map(function (i) { return Object.assign({}, i, { part: getPart(i.partId) }); })
+      .filter(function (r) { return r.part; })
+      .sort(function (a, b) { return a.part.name.localeCompare(b.part.name); });
+  }
+  function locationsForPart(partId) {
+    return state.inventory
+      .filter(function (i) { return i.partId === partId && i.quantity > 0; })
+      .map(function (i) { return { location: state.locations.find(function (l) { return l.id === i.locationId; }), quantity: i.quantity }; })
+      .filter(function (r) { return r.location; })
+      .sort(function (a, b) { return a.location.name.localeCompare(b.location.name); });
+  }
+  function totalForPart(partId) {
+    return state.inventory.filter(function (i) { return i.partId === partId; }).reduce(function (s, i) { return s + i.quantity; }, 0);
+  }
+
+  // ---------- mutations ----------
+  function applyChange(locationId, partId, delta, reason) {
+    var invId = locationId + "__" + partId;
+    var ref = db.doc("inventory/" + invId);
+    return ref.get().then(function (snap) {
+      var current = snap.exists ? (snap.data().quantity || 0) : 0;
+      var next = current + delta;
+      if (next < 0) {
+        toast("Only " + current + " in stock — can't pull " + Math.abs(delta) + ".", true);
+        return false;
+      }
+      return ref.set({ locationId: locationId, partId: partId, quantity: next, updatedAt: Date.now() }).then(function () {
+        logActivity(locationId, partId, delta, reason);
+        return true;
+      });
+    }).catch(function (e) {
+      toast("Couldn't save that change: " + e.message, true);
+      return false;
+    });
+  }
+
+  function logActivity(locationId, partId, delta, reason) {
+    var loc = state.locations.find(function (l) { return l.id === locationId; });
+    var part = getPart(partId);
+    var locRef = db.doc("locations/" + locationId);
+    var partRef = db.doc("parts/" + partId);
+    locRef.get().then(function (snap) {
+      var arr = (snap.exists && snap.data().recentActivity) || [];
+      arr = [{ ts: Date.now(), delta: delta, reason: reason, otherName: part ? part.name : "Part" }].concat(arr).slice(0, 15);
+      return locRef.update({ recentActivity: arr });
+    }).catch(function () {});
+    partRef.get().then(function (snap) {
+      var arr = (snap.exists && snap.data().recentActivity) || [];
+      arr = [{ ts: Date.now(), delta: delta, reason: reason, otherName: loc ? loc.name : "Location" }].concat(arr).slice(0, 15);
+      return partRef.update({ recentActivity: arr });
+    }).catch(function () {});
+  }
+
+  function createLocation(name, notes) {
+    return db.collection("locations").add({
+      code: genCode(6), name: name, notes: notes || null, createdAt: Date.now(), recentActivity: []
+    }).then(function () { toast("Location created."); }).catch(function (e) { toast(e.message, true); });
+  }
+
+  function createPart(name, sku, description, photoDataUrl) {
+    return db.collection("parts").add({
+      name: name, sku: sku || null, description: description || null,
+      photoDataUrl: photoDataUrl || null, createdAt: Date.now(), recentActivity: []
+    }).then(function (ref) { toast("Part added."); return ref; }).catch(function (e) { toast(e.message, true); });
+  }
+
+  function updatePart(id, fields) {
+    return db.doc("parts/" + id).update(fields).then(function () { toast("Saved."); }).catch(function (e) { toast(e.message, true); });
+  }
+
+  // ---------- photo compression ----------
+  function compressImage(file) {
+    var attempts = [[480, 0.6], [360, 0.5], [260, 0.45]];
+    function tryOne(i) {
+      var maxDim = attempts[i][0], quality = attempts[i][1];
+      return new Promise(function (resolve, reject) {
+        var reader = new FileReader();
+        reader.onload = function () {
+          var img = new Image();
+          img.onload = function () {
+            var w = img.width, h = img.height;
+            if (w > h && w > maxDim) { h = Math.round(h * maxDim / w); w = maxDim; }
+            else if (h >= w && h > maxDim) { w = Math.round(w * maxDim / h); h = maxDim; }
+            var canvas = document.createElement("canvas");
+            canvas.width = w; canvas.height = h;
+            canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+            resolve(canvas.toDataURL("image/jpeg", quality));
+          };
+          img.onerror = reject;
+          img.src = reader.result;
+        };
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      }).then(function (dataUrl) {
+        if (dataUrl.length > 170000 && i < attempts.length - 1) return tryOne(i + 1);
+        if (dataUrl.length > 170000) throw new Error("too big");
+        return dataUrl;
+      });
+    }
+    return tryOne(0);
+  }
+
+  function wirePhotoInput(input) {
+    input.addEventListener("change", function () {
+      var file = input.files && input.files[0];
+      var preview = input.parentElement.querySelector(".photo-preview");
+      if (!file) return;
+      input.disabled = true;
+      compressImage(file).then(function (dataUrl) {
+        input.dataset.compressed = dataUrl;
+        if (preview) { preview.src = dataUrl; preview.style.display = "inline-block"; }
+      }).catch(function () {
+        toast("That photo is too large — try a smaller or simpler photo.", true);
+        input.value = "";
+      }).finally(function () { input.disabled = false; });
+    });
+  }
+
+  // ---------- routing ----------
+  function currentRoute() {
+    var h = window.location.hash.replace(/^#\/?/, "");
+    return h.split("/").filter(Boolean);
+  }
+
+  function render() {
+    var app = document.getElementById("app");
+    if (app.hidden) return;
+    var route = currentRoute();
+    document.querySelectorAll("#main-nav a").forEach(function (a) {
+      a.classList.toggle("active", a.dataset.route === (route[0] || ""));
+    });
+
+    if (!db) {
+      document.getElementById("view").innerHTML = '<div class="panel empty-state">Connecting to storage… if this doesn’t clear in a few seconds, reload the page.</div>';
+      return;
+    }
+    if (!isReady()) {
+      document.getElementById("view").innerHTML = '<div class="panel empty-state">Loading inventory…</div>';
+      return;
+    }
+
+    var view = document.getElementById("view");
+    if (route[0] === "l" && route[1]) view.innerHTML = renderLocation(route[1]);
+    else if (route[0] === "locations" && route[1] === "print") view.innerHTML = renderPrintLabels();
+    else if (route[0] === "locations") view.innerHTML = renderLocations();
+    else if (route[0] === "parts" && route[1]) view.innerHTML = renderPartDetail(route[1]);
+    else if (route[0] === "parts") view.innerHTML = renderParts();
+    else view.innerHTML = renderHome();
+
+    renderQRCodes();
+    document.querySelectorAll("input[data-photo]").forEach(wirePhotoInput);
+    var autoFocusEl = view.querySelector("[data-autofocus]");
+    if (autoFocusEl) autoFocusEl.focus();
+  }
+
+  function renderQRCodes() {
+    document.querySelectorAll("[data-qr]").forEach(function (el) {
+      var code = el.dataset.qr;
+      var size = Number(el.dataset.qrSize || 120);
+      el.innerHTML = "";
+      try {
+        if (typeof QRCode === "undefined") throw new Error("QRCode library not loaded");
+        new QRCode(el, { text: locationUrl(code), width: size, height: size, correctLevel: QRCode.CorrectLevel.M });
+      } catch (e) {
+        el.innerHTML = '<a href="' + locationUrl(code) + '" style="font-family:var(--font-mono); font-size:0.75em; word-break:break-all;">' + locationUrl(code) + '</a>';
+      }
+    });
+  }
+
+  // ---------- view: home / search ----------
+  function renderHome() {
+    var params = new URLSearchParams(window.location.hash.split("?")[1] || "");
+    var q = (params.get("q") || "").trim();
+    var html = '' +
+      '<h1>Find a part</h1>' +
+      '<p class="hint" style="margin:6px 0 18px;">Search for a part to see which locations have it, or scan a location’s QR code to see everything there.</p>' +
+      '<form class="form-row" data-form="search" style="margin-bottom:22px;">' +
+        '<input type="text" name="q" value="' + esc(q) + '" placeholder="Search by name, SKU, or description" data-autofocus />' +
+        '<button class="btn btn-accent" type="submit" style="flex:0 0 auto;">Search</button>' +
+      '</form>';
+
+    if (q) {
+      var results = state.parts.filter(function (p) {
+        var hay = ((p.name || "") + " " + (p.sku || "") + " " + (p.description || "")).toLowerCase();
+        return hay.indexOf(q.toLowerCase()) !== -1;
+      });
+      if (!results.length) {
+        html += '<p class="empty-state">No parts match “' + esc(q) + '”.</p>';
+      } else {
+        html += results.map(function (part) {
+          var locs = locationsForPart(part.id);
+          return '<div class="panel" style="margin-bottom:10px;">' +
+            '<div class="ledger-title-row">' +
+              '<a href="#/parts/' + part.id + '" class="ledger-name">' + esc(part.name) + '</a>' +
+              (part.sku ? '<span class="ledger-sku">SKU ' + esc(part.sku) + '</span>' : '') +
+            '</div>' +
+            (locs.length
+              ? '<ul class="activity-list" style="margin-top:8px;">' + locs.map(function (r) {
+                  return '<li class="activity-row"><a href="#/l/' + esc(r.location.code) + '">' + esc(r.location.name) + '</a><span class="qty">' + r.quantity + '</span></li>';
+                }).join("") + '</ul>'
+              : '<p class="hint" style="margin-top:8px;">Not currently stocked anywhere.</p>') +
+            '</div>';
+        }).join("");
+      }
+    }
+
+    html += '<div class="form-row" style="margin-top:24px; border-top:1px solid var(--line); padding-top:18px;">' +
+      '<a href="#/locations" class="btn btn-ghost">Browse all locations</a>' +
+      '<a href="#/parts" class="btn btn-ghost">Browse all parts</a>' +
+    '</div>';
+    return html;
+  }
+
+  // ---------- view: locations ----------
+  function renderLocations() {
+    var html = '<div class="view-head"><h1>Locations</h1>' +
+      (state.locations.length ? '<a href="#/locations/print" class="btn btn-ghost btn-sm">Print all QR labels</a>' : '') +
+      '</div>';
+
+    html += '<div class="panel" style="margin-bottom:22px;">' +
+      '<div class="section-title" style="margin-top:0;">Add a location</div>' +
+      '<form class="form-row" data-form="createLocation">' +
+        '<input type="text" name="name" placeholder="e.g. Shelf A3, Van 2 drawer 4" required data-autofocus />' +
+        '<input type="text" name="notes" placeholder="Notes (optional)" />' +
+        '<button class="btn btn-accent" type="submit" style="flex:0 0 auto;">Create + generate QR</button>' +
+      '</form>' +
+    '</div>';
+
+    if (!state.locations.length) {
+      html += '<p class="empty-state">No locations yet. Add one above, then print its QR code and stick it on the shelf or bin.</p>';
+    } else {
+      var sorted = state.locations.slice().sort(function (a, b) { return a.name.localeCompare(b.name); });
+      html += '<div class="grid-cards">' + sorted.map(function (loc) {
+        return '<a href="#/l/' + esc(loc.code) + '" class="loc-card">' +
+          '<div class="qr-box"><div data-qr="' + esc(loc.code) + '" data-qr-size="112"></div></div>' +
+          '<div class="loc-name">' + esc(loc.name) + '</div>' +
+          (loc.notes ? '<div class="loc-notes">' + esc(loc.notes) + '</div>' : '') +
+        '</a>';
+      }).join("") + '</div>';
+    }
+    return html;
+  }
+
+  function renderPrintLabels() {
+    var sorted = state.locations.slice().sort(function (a, b) { return a.name.localeCompare(b.name); });
+    var html = '<div class="view-head no-print"><h1>Print QR labels</h1>' +
+      '<button class="btn btn-ink" onclick="window.print()">Print</button></div>';
+    html += '<div class="print-grid">' + sorted.map(function (loc) {
+      return '<div class="print-tile"><div class="qr-box" style="display:inline-block;"><div data-qr="' + esc(loc.code) + '" data-qr-size="160"></div></div>' +
+        '<div class="loc-name" style="margin-top:8px;">' + esc(loc.name) + '</div></div>';
+    }).join("") + '</div>';
+    return html;
+  }
+
+  // ---------- view: single location ----------
+  function renderLocation(code) {
+    var loc = getLocationByCode(code);
+    if (!loc) return '<p class="empty-state">No location found for this QR code.</p>';
+    var rows = inventoryForLocation(loc.id);
+    var stockedIds = {};
+    rows.forEach(function (r) { stockedIds[r.partId] = true; });
+    var available = state.parts.filter(function (p) { return !stockedIds[p.id]; }).sort(function (a, b) { return a.name.localeCompare(b.name); });
+
+    var html = '<div class="crumb"><a href="#/locations">Locations</a> / ' + esc(loc.name) + '</div>' +
+      '<h1>' + esc(loc.name) + '</h1>' +
+      (loc.notes ? '<p class="hint" style="margin-top:6px;">' + esc(loc.notes) + '</p>' : '');
+
+    html += '<div class="section-title">What’s here (' + rows.length + ')</div>';
+    if (!rows.length) {
+      html += '<p class="empty-state">Nothing stocked at this location yet.</p>';
+    } else {
+      html += '<ul class="ledger">' + rows.map(function (r) {
+        return '<li class="ledger-row">' +
+          (r.part.photoDataUrl ? '<img class="thumb" src="' + r.part.photoDataUrl + '" alt="" />' : '<div class="thumb-empty">—</div>') +
+          '<div class="ledger-main">' +
+            '<div class="ledger-title-row">' +
+              '<a href="#/parts/' + r.part.id + '" class="ledger-name">' + esc(r.part.name) + '</a>' +
+              '<span class="qty-stencil">' + r.quantity + '</span>' +
+            '</div>' +
+            (r.part.sku ? '<div class="ledger-sku">SKU ' + esc(r.part.sku) + '</div>' : '') +
+            '<div class="ledger-actions">' +
+              '<form data-form="pull" data-location="' + loc.id + '" data-part="' + r.part.id + '">' +
+                '<input class="qty-input" type="number" name="qty" min="1" value="1" required /> ' +
+                '<button class="btn btn-ink btn-sm" type="submit">Pull</button>' +
+              '</form>' +
+              '<form data-form="add" data-location="' + loc.id + '" data-part="' + r.part.id + '">' +
+                '<input class="qty-input" type="number" name="qty" min="1" value="1" required /> ' +
+                '<button class="btn btn-accent btn-sm" type="submit">Add</button>' +
+              '</form>' +
+            '</div>' +
+          '</div>' +
+        '</li>';
+      }).join("") + '</ul>';
+    }
+
+    html += '<div class="form-row" style="align-items:stretch; margin-top:24px;">';
+
+    html += '<div class="panel" style="flex:1; min-width:260px;">' +
+      '<div class="section-title" style="margin-top:0;">Add an existing part here</div>';
+    if (!available.length) {
+      html += '<p class="hint">Every known part is already stocked here.</p>';
+    } else {
+      html += '<form class="form-grid" data-form="addExisting" data-location="' + loc.id + '">' +
+        '<select name="partId" required>' +
+          '<option value="">Choose a part…</option>' +
+          available.map(function (p) { return '<option value="' + p.id + '">' + esc(p.name) + (p.sku ? ' (' + esc(p.sku) + ')' : '') + '</option>'; }).join("") +
+        '</select>' +
+        '<div class="form-row">' +
+          '<input type="number" name="qty" min="1" value="1" required style="max-width:6em;" />' +
+          '<button class="btn btn-accent" type="submit">Add to this location</button>' +
+        '</div>' +
+      '</form>';
+    }
+    html += '</div>';
+
+    html += '<div class="panel" style="flex:1; min-width:260px;">' +
+      '<div class="section-title" style="margin-top:0;">Add a brand new part</div>' +
+      '<form class="form-grid" data-form="addNew" data-location="' + loc.id + '">' +
+        '<input type="text" name="name" placeholder="Part name" required />' +
+        '<input type="text" name="sku" placeholder="SKU / part number (optional)" />' +
+        '<textarea name="description" rows="2" placeholder="Description (optional)"></textarea>' +
+        '<div class="photo-input-row"><input type="file" accept="image/*" capture="environment" data-photo /><img class="photo-preview" alt="" /></div>' +
+        '<div class="form-row">' +
+          '<input type="number" name="qty" min="0" value="1" style="max-width:6em;" />' +
+          '<button class="btn btn-ink" type="submit">Create part</button>' +
+        '</div>' +
+      '</form>' +
+    '</div>';
+
+    html += '</div>';
+    return html;
+  }
+
+  // ---------- view: parts catalog ----------
+  function renderParts() {
+    var params = new URLSearchParams(window.location.hash.split("?")[1] || "");
+    var q = (params.get("q") || "").trim().toLowerCase();
+    var list = state.parts.slice().sort(function (a, b) { return a.name.localeCompare(b.name); });
+    if (q) list = list.filter(function (p) { return ((p.name || "") + " " + (p.sku || "") + " " + (p.description || "")).toLowerCase().indexOf(q) !== -1; });
+
+    var html = '<h1>Parts catalog</h1>' +
+      '<form class="form-row" data-form="partSearch" style="margin:16px 0;">' +
+        '<input type="text" name="q" value="' + esc(q) + '" placeholder="Search by name, SKU, or description" />' +
+        '<button class="btn btn-ink" type="submit" style="flex:0 0 auto;">Search</button>' +
+      '</form>';
+
+    if (!list.length) {
+      html += '<p class="empty-state">No parts match.</p>';
+    } else {
+      html += '<div class="grid-cards" style="grid-template-columns:repeat(auto-fill,minmax(240px,1fr)); margin-bottom:24px;">' + list.map(function (p) {
+        return '<a href="#/parts/' + p.id + '" class="part-card">' +
+          (p.photoDataUrl ? '<img class="thumb" src="' + p.photoDataUrl + '" alt="" />' : '<div class="thumb-empty">—</div>') +
+          '<div style="min-width:0; flex:1;">' +
+            '<div class="ledger-title-row"><span class="ledger-name">' + esc(p.name) + '</span><span class="part-total">' + totalForPart(p.id) + '</span></div>' +
+            (p.sku ? '<div class="ledger-sku">SKU ' + esc(p.sku) + '</div>' : '') +
+          '</div>' +
+        '</a>';
+      }).join("") + '</div>';
+    }
+
+    html += '<div class="panel">' +
+      '<div class="section-title" style="margin-top:0;">Add a part to the catalog</div>' +
+      '<p class="hint" style="margin-top:0;">Registers a part without stocking it anywhere yet. To add stock, open a location instead.</p>' +
+      '<form class="form-grid" data-form="createPart">' +
+        '<div class="form-row">' +
+          '<input type="text" name="name" placeholder="Part name" required />' +
+          '<input type="text" name="sku" placeholder="SKU / part number (optional)" />' +
+        '</div>' +
+        '<textarea name="description" rows="2" placeholder="Description (optional)"></textarea>' +
+        '<div class="photo-input-row"><input type="file" accept="image/*" capture="environment" data-photo /><img class="photo-preview" alt="" /></div>' +
+        '<button class="btn btn-accent" type="submit" style="justify-self:start;">Add part</button>' +
+      '</form>' +
+    '</div>';
+    return html;
+  }
+
+  function renderPartDetail(id) {
+    var part = getPart(id);
+    if (!part) return '<p class="empty-state">Part not found.</p>';
+    var locs = locationsForPart(id);
+    var total = locs.reduce(function (s, l) { return s + l.quantity; }, 0);
+    var activity = part.recentActivity || [];
+
+    var html = '<div class="crumb"><a href="#/parts">Parts</a> / ' + esc(part.name) + '</div>';
+    html += '<div class="panel" style="display:flex; gap:16px;">' +
+      (part.photoDataUrl ? '<img src="' + part.photoDataUrl + '" alt="" style="width:88px;height:88px;object-fit:cover;border-radius:6px;border:1px solid var(--line);" />' : '<div class="thumb-empty" style="width:88px;height:88px;">—</div>') +
+      '<div>' +
+        '<h1>' + esc(part.name) + '</h1>' +
+        (part.sku ? '<div class="ledger-sku">SKU ' + esc(part.sku) + '</div>' : '') +
+        (part.description ? '<p style="margin:8px 0 0; color:var(--muted);">' + esc(part.description) + '</p>' : '') +
+        '<p style="margin:10px 0 0;" class="qty">' + total + ' total in stock</p>' +
+      '</div>' +
+    '</div>';
+
+    html += '<div class="section-title">Where it is</div>';
+    html += locs.length
+      ? '<ul class="ledger">' + locs.map(function (r) {
+          return '<li class="ledger-row"><a class="ledger-name" href="#/l/' + esc(r.location.code) + '" style="flex:1;">' + esc(r.location.name) + '</a><span class="qty-stencil">' + r.quantity + '</span></li>';
+        }).join("") + '</ul>'
+      : '<p class="empty-state">Not currently stocked anywhere.</p>';
+
+    if (activity.length) {
+      html += '<div class="section-title">Recent activity</div>';
+      html += '<ul class="activity-list panel">' + activity.map(function (a) {
+        return '<li class="activity-row"><span>' + new Date(a.ts).toLocaleString() + ' · ' + esc(a.otherName) + ' · ' + esc(a.reason) + '</span>' +
+          '<span class="activity-delta ' + (a.delta >= 0 ? "pos" : "neg") + '">' + (a.delta >= 0 ? "+" : "") + a.delta + '</span></li>';
+      }).join("") + '</ul>';
+    }
+
+    html += '<div class="section-title">Edit part</div>';
+    html += '<form class="panel form-grid" data-form="updatePart" data-id="' + part.id + '">' +
+      '<div class="form-row">' +
+        '<input type="text" name="name" value="' + esc(part.name) + '" required />' +
+        '<input type="text" name="sku" value="' + esc(part.sku || "") + '" placeholder="SKU / part number" />' +
+      '</div>' +
+      '<textarea name="description" rows="2" placeholder="Description">' + esc(part.description || "") + '</textarea>' +
+      '<div class="photo-input-row"><input type="file" accept="image/*" capture="environment" data-photo /><img class="photo-preview" alt="" /></div>' +
+      '<button class="btn btn-ink" type="submit" style="justify-self:start;">Save changes</button>' +
+    '</form>';
+    return html;
+  }
+
+  // ---------- QR scanning ----------
+  var scanner = { stream: null, rafId: null, active: false, canvas: document.createElement("canvas") };
+
+  function extractLocationCode(text) {
+    if (!text) return null;
+    var s = String(text).trim();
+    var m = s.match(/#\/l\/([a-z0-9]+)/i);
+    if (m) return m[1];
+    if (/^[a-z0-9]{3,16}$/i.test(s)) return s;
+    return null;
+  }
+
+  function goToScannedCode(raw) {
+    var code = extractLocationCode(raw);
+    if (!code) {
+      document.getElementById("scan-status").textContent = "That doesn't look like a Clean Inventory location code.";
+      return false;
+    }
+    var loc = getLocationByCode(code);
+    if (!loc) {
+      document.getElementById("scan-status").textContent = "No location matches that code.";
+      return false;
+    }
+    closeScanner();
+    window.location.hash = "#/l/" + code;
+    toast("Opened " + loc.name + ".");
+    return true;
+  }
+
+  function scanTick() {
+    if (!scanner.active) return;
+    var video = document.getElementById("scan-video");
+    if (video.readyState === video.HAVE_ENOUGH_DATA && typeof jsQR !== "undefined") {
+      var canvas = scanner.canvas;
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      var ctx = canvas.getContext("2d");
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      var frame;
+      try { frame = ctx.getImageData(0, 0, canvas.width, canvas.height); } catch (e) { frame = null; }
+      if (frame) {
+        var code = jsQR(frame.data, frame.width, frame.height, { inversionAttempts: "dontInvert" });
+        if (code && code.data) {
+          if (goToScannedCode(code.data)) return;
+        }
+      }
+    }
+    scanner.rafId = requestAnimationFrame(scanTick);
+  }
+
+  function openScanner() {
+    var modal = document.getElementById("scan-modal");
+    var status = document.getElementById("scan-status");
+    modal.hidden = false;
+    status.textContent = "Requesting camera access…";
+    document.getElementById("scan-manual-input").value = "";
+
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      status.textContent = "Camera access isn't available here — type the location code below instead.";
+      return;
+    }
+    navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } }).then(function (stream) {
+      scanner.stream = stream;
+      var video = document.getElementById("scan-video");
+      video.srcObject = stream;
+      video.play().catch(function () {});
+      scanner.active = true;
+      status.textContent = "Point the camera at a location's QR code.";
+      scanner.rafId = requestAnimationFrame(scanTick);
+    }).catch(function (e) {
+      status.textContent = "Couldn't access the camera (" + e.message + ") — type the location code below instead.";
+    });
+  }
+
+  function closeScanner() {
+    scanner.active = false;
+    if (scanner.rafId) cancelAnimationFrame(scanner.rafId);
+    scanner.rafId = null;
+    if (scanner.stream) {
+      scanner.stream.getTracks().forEach(function (t) { t.stop(); });
+      scanner.stream = null;
+    }
+    var video = document.getElementById("scan-video");
+    if (video) video.srcObject = null;
+    document.getElementById("scan-modal").hidden = true;
+  }
+
+  document.getElementById("scan-fab").addEventListener("click", openScanner);
+  document.getElementById("scan-close").addEventListener("click", closeScanner);
+  document.getElementById("scan-modal").addEventListener("click", function (e) {
+    if (e.target.id === "scan-modal") closeScanner();
+  });
+  document.getElementById("scan-manual-form").addEventListener("submit", function (e) {
+    e.preventDefault();
+    goToScannedCode(document.getElementById("scan-manual-input").value);
+  });
+
+  // ---------- event delegation ----------
+  document.getElementById("view").addEventListener("submit", function (e) {
+    var form = e.target.closest("form[data-form]");
+    if (!form) return;
+    e.preventDefault();
+    var kind = form.dataset.form;
+    var fd = new FormData(form);
+
+    if (kind === "search") {
+      window.location.hash = "#/?q=" + encodeURIComponent(fd.get("q") || "");
+      return;
+    }
+    if (kind === "partSearch") {
+      window.location.hash = "#/parts?q=" + encodeURIComponent(fd.get("q") || "");
+      return;
+    }
+    if (kind === "createLocation") {
+      var name = (fd.get("name") || "").trim();
+      if (!name) return;
+      createLocation(name, (fd.get("notes") || "").trim());
+      return;
+    }
+    if (kind === "createPart") {
+      var pname = (fd.get("name") || "").trim();
+      if (!pname) return;
+      var photoInput = form.querySelector("input[data-photo]");
+      createPart(pname, (fd.get("sku") || "").trim(), (fd.get("description") || "").trim(), photoInput ? photoInput.dataset.compressed : null);
+      return;
+    }
+    if (kind === "pull" || kind === "add") {
+      var qty = Number(fd.get("qty"));
+      if (!qty || qty <= 0) return;
+      var delta = kind === "pull" ? -Math.round(qty) : Math.round(qty);
+      applyChange(form.dataset.location, form.dataset.part, delta, kind);
+      return;
+    }
+    if (kind === "addExisting") {
+      var partId = fd.get("partId");
+      var q2 = Number(fd.get("qty"));
+      if (!partId || !q2 || q2 <= 0) return;
+      applyChange(form.dataset.location, partId, Math.round(q2), "add");
+      return;
+    }
+    if (kind === "addNew") {
+      var newName = (fd.get("name") || "").trim();
+      if (!newName) return;
+      var qty2 = Number(fd.get("qty")) || 0;
+      var pInput = form.querySelector("input[data-photo]");
+      createPart(newName, (fd.get("sku") || "").trim(), (fd.get("description") || "").trim(), pInput ? pInput.dataset.compressed : null)
+        .then(function (ref) {
+          if (ref && qty2 > 0) return applyChange(form.dataset.location, ref.id, Math.round(qty2), "initial");
+        });
+      return;
+    }
+    if (kind === "updatePart") {
+      var uName = (fd.get("name") || "").trim();
+      if (!uName) return;
+      var uInput = form.querySelector("input[data-photo]");
+      var fields = { name: uName, sku: (fd.get("sku") || "").trim() || null, description: (fd.get("description") || "").trim() || null };
+      if (uInput && uInput.dataset.compressed) fields.photoDataUrl = uInput.dataset.compressed;
+      updatePart(form.dataset.id, fields);
+      return;
+    }
+  });
+
+  window.addEventListener("hashchange", render);
+
+  // ---------- local fallback storage (used when not running as a Claude artifact) ----------
+  function LocalDB() {
+    var STORAGE_KEY = "ci_local_db_v1";
+    var data = {};
+    var listeners = {};
+
+    function load() {
+      try {
+        var raw = localStorage.getItem(STORAGE_KEY);
+        data = raw ? JSON.parse(raw) : {};
+      } catch (e) { data = {}; }
+    }
+    function persist() {
+      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); } catch (e) {}
+    }
+    function ensure(coll) { if (!data[coll]) data[coll] = {}; }
+    function notify(coll) {
+      ensure(coll);
+      var docs = Object.keys(data[coll]).map(function (id) {
+        return { id: id, data: function () { return data[coll][id]; } };
+      });
+      var snap = { docs: docs };
+      (listeners[coll] || []).forEach(function (l) {
+        try { l(snap); } catch (e) {}
+      });
+    }
+    function genId() { return "id" + Date.now().toString(36) + Math.random().toString(36).slice(2, 8); }
+
+    load();
+
+    return {
+      collection: function (name) {
+        ensure(name);
+        return {
+          add: function (obj) {
+            var id = genId();
+            data[name][id] = obj;
+            persist();
+            notify(name);
+            return Promise.resolve({ id: id });
+          },
+          onSnapshot: function (cb, errCb) {
+            listeners[name] = listeners[name] || [];
+            listeners[name].push(cb);
+            setTimeout(function () { notify(name); }, 0);
+            return function unsubscribe() {
+              listeners[name] = (listeners[name] || []).filter(function (l) { return l !== cb; });
+            };
+          }
+        };
+      },
+      doc: function (path) {
+        var parts = path.split("/");
+        var coll = parts[0], id = parts[1];
+        ensure(coll);
+        return {
+          get: function () {
+            var exists = Object.prototype.hasOwnProperty.call(data[coll], id);
+            return Promise.resolve({ exists: exists, data: function () { return data[coll][id]; } });
+          },
+          set: function (obj) {
+            data[coll][id] = obj;
+            persist();
+            notify(coll);
+            return Promise.resolve();
+          },
+          update: function (fields) {
+            data[coll][id] = Object.assign({}, data[coll][id] || {}, fields);
+            persist();
+            notify(coll);
+            return Promise.resolve();
+          }
+        };
+      }
+    };
+  }
+
+  // ---------- boot ----------
+  function wireDb() {
+    db.collection("locations").onSnapshot(function (snap) {
+      state.locations = snap.docs.map(function (d) { return Object.assign({ id: d.id }, d.data()); });
+      state.ready.locations = true;
+      render();
+    }, function (e) { toast("Locations sync error: " + e.message, true); });
+
+    db.collection("parts").onSnapshot(function (snap) {
+      state.parts = snap.docs.map(function (d) { return Object.assign({ id: d.id }, d.data()); });
+      state.ready.parts = true;
+      render();
+    }, function (e) { toast("Parts sync error: " + e.message, true); });
+
+    db.collection("inventory").onSnapshot(function (snap) {
+      state.inventory = snap.docs.map(function (d) { return Object.assign({ id: d.id }, d.data()); });
+      state.ready.inventory = true;
+      render();
+    }, function (e) { toast("Inventory sync error: " + e.message, true); });
+  }
+
+  function boot() {
+    render();
+    if (window.claude && window.claude.use) {
+      window.claude.use("db").then(function (namespace) {
+        db = namespace || LocalDB();
+        wireDb();
+      }).catch(function () {
+        db = LocalDB();
+        wireDb();
+      });
+    } else {
+      // Running outside claude.ai (opened directly, or served from a local dev server) —
+      // fall back to a browser-local store so the app is still fully usable.
+      db = LocalDB();
+      wireDb();
+    }
+  }
+})();
+</script>
+
+</body></html>
