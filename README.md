@@ -2,8 +2,15 @@
 
 A single-file inventory web app for tracking parts across shelf/bin locations via QR codes.
 
-- Live version: published as a Claude artifact, backed by a shared realtime database (locations, parts, inventory collections) so everyone sees the same data.
-- `index.html` here is the same app. Opened directly (double-click, or any static file server) it falls back to a browser-local store (localStorage) instead of the shared database — data won't sync between devices/browsers in that mode.
-- The QR scan button uses the camera (`getUserMedia`), which most browsers only allow over HTTPS or `localhost` — it may not work when opened as a plain `file://` page. Serve it locally (e.g. `npx serve .`) to test scanning outside the hosted artifact.
-
-Previous history: this repo used to hold a Next.js + Supabase implementation of the same idea. Those files were moved to `_to_delete/` and are not tracked by git — delete that folder yourself when you're ready (Claude's session here doesn't have permission to remove files on this machine).
+- **Data**: backed by Supabase (Postgres + Realtime). Run `supabase-schema.sql` once in your
+  project's SQL Editor to create the `locations`, `parts`, and `inventory` tables, RLS
+  policies, and realtime publication. The project URL and anon/publishable key are embedded
+  directly in `index.html` (normal for Supabase's public anon key model, as long as RLS is
+  configured — see the note in the schema file about the passcode gate not being real auth).
+- **Hosting**: `index.html` is fully static — open it directly, serve it from any static host,
+  or enable GitHub Pages on this repo (Settings → Pages → Source: Deploy from a branch → `main` / `/ (root)`).
+- **QR scanning**: the "Scan location" button uses the camera (`getUserMedia`), which most
+  browsers only allow over HTTPS or `localhost` — it won't work opened as a plain `file://` page.
+  A manual code-entry fallback is built into the same modal.
+- If the Supabase client library fails to load (offline, CDN blocked), the app falls back to a
+  browser-local store (localStorage) for that one device only — not shared, just keeps the app usable.
