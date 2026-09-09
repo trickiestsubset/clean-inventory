@@ -497,7 +497,7 @@
       var current = snap.exists ? (snap.data().quantity || 0) : 0;
       var next = current + delta;
       if (next < 0) {
-        toast("Only " + current + " in stock — can't pick " + Math.abs(delta) + ".", true);
+        toast("Only " + current + " in stock — can't pull " + Math.abs(delta) + ".", true);
         return false;
       }
       return ref.set({ locationId: locationId, partId: partId, quantity: next, updatedAt: Date.now() }).then(function () {
@@ -772,9 +772,9 @@
             '</div>' +
             (r.part.sku ? '<div class="ledger-sku">SKU ' + esc(r.part.sku) + '</div>' : '') +
             '<div class="ledger-actions">' +
-              '<form data-form="pick" data-location="' + loc.id + '" data-part="' + r.part.id + '">' +
+              '<form data-form="pull" data-location="' + loc.id + '" data-part="' + r.part.id + '">' +
                 '<input class="qty-input" type="number" name="qty" min="1" value="1" required /> ' +
-                '<button class="btn btn-accent btn-sm" type="submit">Pick</button>' +
+                '<button class="btn btn-accent btn-sm" type="submit">Pull</button>' +
               '</form>' +
               '<form data-form="add" data-location="' + loc.id + '" data-part="' + r.part.id + '">' +
                 '<input class="qty-input" type="number" name="qty" min="1" value="1" required /> ' +
@@ -867,8 +867,8 @@
           '<p class="qty" style="margin:0;">' + total + ' total in stock</p>' +
           (total > 0
             ? '<div style="display:flex; gap:6px; align-items:center;">' +
-                '<input class="qty-input" type="number" id="pick-qty-input" min="1" value="1" />' +
-                '<button class="btn btn-accent btn-sm" type="button" data-pick="' + id + '">Pick</button>' +
+                '<input class="qty-input" type="number" id="pull-qty-input" min="1" value="1" />' +
+                '<button class="btn btn-accent btn-sm" type="button" data-pull="' + id + '">Pull</button>' +
               '</div>'
             : '') +
         '</div>' +
@@ -910,7 +910,7 @@
 
   // ---------- QR scanning ----------
   // scanner.onResolve, when set, redirects a successful scan/manual-entry to a callback
-  // (used by the add/move/pick flows to pick a location) instead of navigating to it.
+  // (used by the add/move/pull flows to choose a location) instead of navigating to it.
   var scanner = { stream: null, rafId: null, active: false, canvas: document.createElement("canvas"), onResolve: null };
 
   function extractLocationCode(text) {
@@ -1047,14 +1047,14 @@
     useLocation(loc);
   });
 
-  // ---------- add / move / pick flows ----------
+  // ---------- add / move / pull flows ----------
   // A part can be stocked at any number of locations at once (inventory rows are keyed by
   // location+part, so the same part having stock in several places is the normal case, not
   // an edge case). These three flows let you add a part to a location, move stock from one
-  // location to another, or pick (remove) stock — each via a popup where the location is
+  // location to another, or pull (remove) stock — each via a popup where the location is
   // entered as Section-Aisle-Bay-Shelf (the same four auto-advancing boxes as "Add a
   // location") or resolved by scanning its QR label.
-  var flow = null; // { kind: "add" | "move" | "pick", partId, section, aisle, bay, shelf, fromId, qty }
+  var flow = null; // { kind: "add" | "move" | "pull", partId, section, aisle, bay, shelf, fromId, qty }
 
   function getLocationByParts(section, aisle, bay, shelf) {
     var s = (section || "").trim().toUpperCase();
@@ -1092,10 +1092,10 @@
     renderFlow();
   }
 
-  function openPickFlow(partId, qty) {
+  function openPullFlow(partId, qty) {
     var locs = locationsForPart(partId);
-    if (!locs.length) { toast("Not currently stocked anywhere to pick from.", true); return; }
-    flow = { kind: "pick", partId: partId, fromId: locs[0].location.id, qty: qty || 1 };
+    if (!locs.length) { toast("Not currently stocked anywhere to pull from.", true); return; }
+    flow = { kind: "pull", partId: partId, fromId: locs[0].location.id, qty: qty || 1 };
     renderFlow();
   }
 
@@ -1105,7 +1105,7 @@
     var part = getPart(flow.partId);
     modal.hidden = false;
     document.getElementById("flow-title").textContent =
-      (flow.kind === "add" ? "Add " : flow.kind === "move" ? "Move " : "Pick ") + (part ? part.name : "this part");
+      (flow.kind === "add" ? "Add " : flow.kind === "move" ? "Move " : "Pull ") + (part ? part.name : "this part");
 
     var locationBoxes =
       '<div class="loc-parts-row">' +
@@ -1128,7 +1128,7 @@
           '<p class="flow-error" id="flow-error"></p>' +
           '<button class="btn btn-accent" type="button" id="flow-confirm">Add</button>' +
         '</div>';
-    } else if (flow.kind === "move" || flow.kind === "pick") {
+    } else if (flow.kind === "move" || flow.kind === "pull") {
       var locs = locationsForPart(flow.partId);
       var fromSelect =
         '<select id="flow-from">' +
@@ -1145,7 +1145,7 @@
           '<input type="number" id="flow-qty" min="1" value="' + flow.qty + '" />' +
           '<p class="flow-error" id="flow-error"></p>' +
           '<button class="btn ' + (flow.kind === "move" ? "btn-accent" : "btn-accent") + '" type="button" id="flow-confirm">' +
-            (flow.kind === "move" ? "Move" : "Pick") +
+            (flow.kind === "move" ? "Move" : "Pull") +
           '</button>' +
         '</div>';
     }
@@ -1201,7 +1201,7 @@
     if (flow.kind === "move") {
       var toLoc = getLocationByParts(flow.section, flow.aisle, flow.bay, flow.shelf);
       if (!toLoc) { flowError("No location matches that Section-Aisle-Bay-Shelf."); return; }
-      if (toLoc.id === flow.fromId) { flowError("Pick a different location to move to."); return; }
+      if (toLoc.id === flow.fromId) { flowError("Choose a different location to move to."); return; }
       applyChange(flow.fromId, flow.partId, -qty, "move out").then(function (ok) {
         if (!ok) return;
         applyChange(toLoc.id, flow.partId, qty, "move in").then(function (ok2) {
@@ -1212,8 +1212,8 @@
       return;
     }
 
-    if (flow.kind === "pick") {
-      applyChange(flow.fromId, flow.partId, -qty, "pick").then(function (ok) {
+    if (flow.kind === "pull") {
+      applyChange(flow.fromId, flow.partId, -qty, "pull").then(function (ok) {
         if (ok) closeFlow();
       });
       return;
@@ -1269,10 +1269,10 @@
         });
       return;
     }
-    if (kind === "pick" || kind === "add") {
+    if (kind === "pull" || kind === "add") {
       var qty = Number(fd.get("qty"));
       if (!qty || qty <= 0) return;
-      var delta = kind === "pick" ? -Math.round(qty) : Math.round(qty);
+      var delta = kind === "pull" ? -Math.round(qty) : Math.round(qty);
       applyChange(form.dataset.location, form.dataset.part, delta, kind);
       return;
     }
@@ -1301,11 +1301,11 @@
       else if (flowBtn.dataset.flow === "move") openMoveFlow(flowBtn.dataset.part);
       return;
     }
-    var pickBtn = e.target.closest("[data-pick]");
-    if (pickBtn) {
-      var qtyInput = document.getElementById("pick-qty-input");
+    var pullBtn = e.target.closest("[data-pull]");
+    if (pullBtn) {
+      var qtyInput = document.getElementById("pull-qty-input");
       var qty = qtyInput ? Number(qtyInput.value) || 1 : 1;
-      openPickFlow(pickBtn.dataset.pick, qty);
+      openPullFlow(pullBtn.dataset.pull, qty);
     }
   });
 
