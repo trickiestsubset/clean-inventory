@@ -232,7 +232,7 @@
 
   .empty-state { color: var(--muted); font-size: 0.92em; padding: 18px 4px; }
 
-  .toast-wrap { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); z-index: 50; display: flex; flex-direction: column; gap: 8px; align-items: center; }
+  .toast-wrap { position: fixed; bottom: 76px; left: 50%; transform: translateX(-50%); z-index: 50; display: flex; flex-direction: column; gap: 8px; align-items: center; }
   .toast {
     background: var(--ink); color: var(--bg); padding: 10px 16px; border-radius: var(--radius-sm);
     font-size: 0.88em; box-shadow: var(--shadow); animation: toast-in 0.15s ease-out;
@@ -252,19 +252,14 @@
 
   [hidden] { display: none !important; }
 
-  .scan-fab-wrap {
-    position: fixed; left: 0; right: 0; bottom: 84px; z-index: 40;
-    display: flex; justify-content: center; pointer-events: none;
+  .scan-bar {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 40; height: 60px;
+    display: flex; align-items: center; justify-content: center; gap: 0.5em;
+    background: var(--accent); color: var(--accent-ink); border: none; border-top: 1px solid var(--line);
+    font-weight: 600; font-size: 1.05em; box-shadow: 0 -2px 6px rgba(0, 0, 0, 0.08);
   }
-  .scan-fab {
-    pointer-events: auto;
-    display: inline-flex; align-items: center; gap: 0.5em;
-    background: var(--accent); color: var(--accent-ink); border: none;
-    border-radius: 999px; padding: 0.7em 1.1em 0.7em 0.9em;
-    font-weight: 600; font-size: 1.35em; box-shadow: var(--shadow);
-  }
-  .scan-fab:hover { filter: brightness(1.1); }
-  .scan-fab svg { width: 1.2em; height: 1.2em; flex-shrink: 0; }
+  .scan-bar:hover { filter: brightness(1.1); }
+  .scan-bar svg { width: 1.3em; height: 1.3em; flex-shrink: 0; }
 
   .scan-modal-backdrop {
     position: fixed; inset: 0; z-index: 60; background: rgba(10, 12, 8, 0.6);
@@ -322,16 +317,14 @@
   </header>
   <main class="app-main" id="view"></main>
 
-  <div class="scan-fab-wrap">
-    <button class="scan-fab" id="scan-fab" type="button">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/>
-        <path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/>
-        <rect x="7" y="7" width="10" height="10" rx="1"/>
-      </svg>
-      Scan location
-    </button>
-  </div>
+  <button class="scan-bar" id="scan-fab" type="button">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/>
+      <path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/>
+      <rect x="7" y="7" width="10" height="10" rx="1"/>
+    </svg>
+    Scan location
+  </button>
 
   <div class="scan-modal-backdrop" id="cycle-modal" hidden>
     <div class="scan-modal">
