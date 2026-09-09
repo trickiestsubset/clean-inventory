@@ -623,7 +623,8 @@
     }
 
     var view = document.getElementById("view");
-    if (route[0] === "l" && route[1]) view.innerHTML = renderLocation(route[1]);
+    if (route[0] === "l" && route[1] && route[2] === "print") view.innerHTML = renderLocationPrint(route[1]);
+    else if (route[0] === "l" && route[1]) view.innerHTML = renderLocation(route[1]);
     else if (route[0] === "locations" && route[1] === "print") view.innerHTML = renderPrintLabels();
     else if (route[0] === "locations") view.innerHTML = renderLocations();
     else if (route[0] === "parts" && route[1]) view.innerHTML = renderPartDetail(route[1]);
@@ -745,6 +746,18 @@
     return html;
   }
 
+  function renderLocationPrint(code) {
+    var loc = getLocationByCode(code);
+    if (!loc) return '<p class="empty-state">No location found for this QR code.</p>';
+    var html = '<div class="view-head no-print"><h1>Print QR code</h1>' +
+      '<button class="btn btn-ink" onclick="window.print()">Print</button></div>';
+    html += '<div class="print-grid">' +
+      '<div class="print-tile"><div class="qr-box" style="display:inline-block;"><div data-qr="' + esc(loc.code) + '" data-qr-size="160"></div></div>' +
+        '<div class="loc-name" style="margin-top:8px;">' + esc(loc.name) + '</div></div>' +
+    '</div>';
+    return html;
+  }
+
   // ---------- view: single location ----------
   function renderLocation(code) {
     var loc = getLocationByCode(code);
@@ -758,7 +771,10 @@
       '<h1>' + esc(loc.name) + '</h1>' +
       (loc.notes ? '<p class="hint" style="margin-top:6px;">' + esc(loc.notes) + '</p>' : '');
 
-    html += '<div class="section-title">In stock at this location (' + rows.length + ')</div>';
+    html += '<div class="view-head no-print" style="margin-bottom:8px;">' +
+      '<div class="section-title" style="margin:0;">In stock at this location (' + rows.length + ')</div>' +
+      '<a href="#/l/' + esc(loc.code) + '/print" class="btn btn-accent btn-sm">Print QR code</a>' +
+    '</div>';
     if (!rows.length) {
       html += '<p class="empty-state">Nothing stocked at this location yet.</p>';
     } else {
