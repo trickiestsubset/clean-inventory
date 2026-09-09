@@ -758,7 +758,7 @@
       '<h1>' + esc(loc.name) + '</h1>' +
       (loc.notes ? '<p class="hint" style="margin-top:6px;">' + esc(loc.notes) + '</p>' : '');
 
-    html += '<div class="section-title">What’s here (' + rows.length + ')</div>';
+    html += '<div class="section-title">In stock at this location (' + rows.length + ')</div>';
     if (!rows.length) {
       html += '<p class="empty-state">Nothing stocked at this location yet.</p>';
     } else {
