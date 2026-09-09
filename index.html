@@ -94,6 +94,7 @@
   .btn-accent { background: var(--accent); color: var(--accent-ink); }
   .btn-ink { background: var(--ink); color: var(--bg); }
   .btn-ghost { background: transparent; border-color: var(--line); }
+  .btn-danger { background: var(--danger-wash); color: var(--danger); }
   .btn-sm { padding: 0.35em 0.6em; font-size: 0.85em; }
   .btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
@@ -314,9 +315,8 @@
     <div class="header-inner">
       <a href="#/" class="wordmark"><span class="dot"></span>Clean Inventory</a>
       <nav class="main-nav" id="main-nav">
-        <a href="#/" data-route="">Search</a>
-        <a href="#/locations" data-route="locations">Locations</a>
         <a href="#/parts" data-route="parts">Parts</a>
+        <a href="#/locations" data-route="locations">Setup</a>
       </nav>
     </div>
   </header>
@@ -465,6 +465,9 @@
   function getLocationByCode(code) {
     return state.locations.find(function (l) { return l.code === code; });
   }
+  function getLocationById(id) {
+    return state.locations.find(function (l) { return l.id === id; });
+  }
   function getPart(id) {
     return state.parts.find(function (p) { return p.id === id; });
   }
@@ -540,6 +543,22 @@
     }).then(function () { toast("Location created."); }).catch(function (e) { toast(e.message, true); });
   }
 
+  function deleteLocation(locationId) {
+    var loc = getLocationById(locationId);
+    if (!loc) return;
+    var stocked = inventoryForLocation(locationId);
+    if (stocked.length) {
+      toast("Move every part out of " + loc.name + " before deleting it (" + stocked.length + " part" + (stocked.length === 1 ? "" : "s") + " still stocked there).", true);
+      return;
+    }
+    if (!window.confirm('Delete "' + loc.name + '"? This can\'t be undone.')) return;
+    db.doc("locations/" + locationId).delete().then(function () {
+      toast("Deleted " + loc.name + ".");
+    }).catch(function (e) {
+      toast("Couldn't delete that location: " + e.message, true);
+    });
+  }
+
   function createPart(name, sku, description, photoDataUrl) {
     return db.collection("parts").add({
       name: name, sku: sku || null, description: description || null,
@@ -610,7 +629,7 @@
     if (app.hidden) return;
     var route = currentRoute();
     document.querySelectorAll("#main-nav a").forEach(function (a) {
-      a.classList.toggle("active", a.dataset.route === (route[0] || ""));
+      a.classList.toggle("active", a.dataset.route === (route[0] || "parts"));
     });
 
     if (!db) {
@@ -629,7 +648,7 @@
     else if (route[0] === "locations") view.innerHTML = renderLocations();
     else if (route[0] === "parts" && route[1]) view.innerHTML = renderPartDetail(route[1]);
     else if (route[0] === "parts") view.innerHTML = renderParts();
-    else view.innerHTML = renderHome();
+    else view.innerHTML = renderParts();
 
     renderQRCodes();
     document.querySelectorAll("input[data-photo]").forEach(wirePhotoInput);
@@ -651,55 +670,15 @@
     });
   }
 
-  // ---------- view: home / search ----------
-  function renderHome() {
-    var params = new URLSearchParams(window.location.hash.split("?")[1] || "");
-    var q = (params.get("q") || "").trim();
-    var html = '' +
-      '<h1>Find a part</h1>' +
-      '<p class="hint" style="margin:6px 0 18px;">Search for a part to see which locations have it, or scan a location’s QR code to see everything there.</p>' +
-      '<form class="form-row" data-form="search" style="margin-bottom:22px;">' +
-        '<input type="text" name="q" value="' + esc(q) + '" placeholder="Search by name, SKU, or description" data-autofocus />' +
-        '<button class="btn btn-accent" type="submit" style="flex:0 0 auto;">Search</button>' +
-      '</form>';
-
-    if (q) {
-      var results = state.parts.filter(function (p) {
-        var hay = ((p.name || "") + " " + (p.sku || "") + " " + (p.description || "")).toLowerCase();
-        return hay.indexOf(q.toLowerCase()) !== -1;
-      });
-      if (!results.length) {
-        html += '<p class="empty-state">No parts match “' + esc(q) + '”.</p>';
-      } else {
-        html += results.map(function (part) {
-          var locs = locationsForPart(part.id);
-          return '<div class="panel" style="margin-bottom:10px;">' +
-            '<div class="ledger-title-row">' +
-              '<a href="#/parts/' + part.id + '" class="ledger-name">' + esc(part.name) + '</a>' +
-              (part.sku ? '<span class="ledger-sku">SKU ' + esc(part.sku) + '</span>' : '') +
-            '</div>' +
-            (locs.length
-              ? '<ul class="activity-list" style="margin-top:8px;">' + locs.map(function (r) {
-                  return '<li class="activity-row"><a href="#/l/' + esc(r.location.code) + '">' + esc(r.location.name) + '</a><span class="qty">' + r.quantity + '</span></li>';
-                }).join("") + '</ul>'
-              : '<p class="hint" style="margin-top:8px;">Not currently stocked anywhere.</p>') +
-            '</div>';
-        }).join("");
-      }
-    }
-
-    html += '<div class="form-row" style="margin-top:24px; border-top:1px solid var(--line); padding-top:18px;">' +
-      '<a href="#/locations" class="btn btn-ghost">Browse all locations</a>' +
-      '<a href="#/parts" class="btn btn-ghost">Browse all parts</a>' +
-    '</div>';
-    return html;
-  }
-
-  // ---------- view: locations ----------
+  // ---------- view: locations / setup ----------
   function renderLocations() {
-    var html = '<div class="view-head"><h1>Locations</h1>' +
-      (state.locations.length ? '<a href="#/locations/print" class="btn btn-ghost btn-sm">Print all QR labels</a>' : '') +
+    var html = '<div class="view-head"><h1>Setup</h1>' +
+      (state.locations.length ? '<a href="#/locations/print" class="btn btn-ghost btn-sm">Print QR labels for all locations</a>' : '') +
       '</div>';
+
+    html += '<h2 style="margin-bottom:16px;">Location Maintenance</h2>';
+
+    html += renderCycleCountBox();
 
     html += '<div class="panel" style="margin-bottom:22px;">' +
       '<div class="section-title" style="margin-top:0;">Add a location</div>' +
@@ -720,18 +699,98 @@
       '</form>' +
     '</div>';
 
+    html += '<div class="panel">' +
+      '<div class="section-title" style="margin-top:0;">Manage locations</div>';
     if (!state.locations.length) {
       html += '<p class="empty-state">No locations yet. Add one above, then print its QR code and stick it on the shelf or bin.</p>';
     } else {
       var sorted = state.locations.slice().sort(function (a, b) { return a.name.localeCompare(b.name); });
-      html += '<div class="grid-cards">' + sorted.map(function (loc) {
-        return '<a href="#/l/' + esc(loc.code) + '" class="loc-card">' +
-          '<div class="qr-box"><div data-qr="' + esc(loc.code) + '" data-qr-size="112"></div></div>' +
-          '<div class="loc-name">' + esc(loc.name) + '</div>' +
-          (loc.notes ? '<div class="loc-notes">' + esc(loc.notes) + '</div>' : '') +
-        '</a>';
-      }).join("") + '</div>';
+      html += '<ul class="activity-list">' + sorted.map(function (loc) {
+        return '<li class="activity-row">' +
+          '<span><a href="#/l/' + esc(loc.code) + '">' + esc(loc.name) + '</a>' +
+            (loc.notes ? ' <span class="hint">' + esc(loc.notes) + '</span>' : '') +
+          '</span>' +
+          '<button class="btn btn-danger btn-sm" type="button" data-delete-location="' + loc.id + '">Delete</button>' +
+        '</li>';
+      }).join("") + '</ul>';
     }
+    html += '</div>';
+    return html;
+  }
+
+  // ---------- cycle count ----------
+  // Spot-checks a random in-stock location+part pair: tells the user what to go look for,
+  // and corrects the recorded quantity to match what's actually counted on the shelf.
+  function pickCycleCountTarget() {
+    var candidates = state.inventory.filter(function (i) {
+      return i.quantity > 0 && getLocationById(i.locationId) && getPart(i.partId);
+    });
+    if (!candidates.length) return null;
+    return candidates[Math.floor(Math.random() * candidates.length)];
+  }
+
+  function startCycleCount() {
+    var target = pickCycleCountTarget();
+    if (!target) {
+      toast("Nothing is currently stocked anywhere to count.", true);
+      cycleCount = null;
+    } else {
+      cycleCount = { locationId: target.locationId, partId: target.partId };
+    }
+    render();
+  }
+
+  function applyCycleCount(locationId, partId, actualQty) {
+    var invId = locationId + "__" + partId;
+    var ref = db.doc("inventory/" + invId);
+    return ref.get().then(function (snap) {
+      var current = snap.exists ? (snap.data().quantity || 0) : 0;
+      var next = Math.max(0, actualQty);
+      return ref.set({ locationId: locationId, partId: partId, quantity: next, updatedAt: Date.now() }).then(function () {
+        var reason = (next === current) ? ("cycle count: confirmed at " + next) : ("cycle count: " + current + " → " + next);
+        logActivity(locationId, partId, next - current, reason);
+        toast(next === current ? "Count matches — no change needed." : "Updated to " + next + ".");
+        return true;
+      });
+    }).catch(function (e) {
+      toast("Couldn't save that count: " + e.message, true);
+      return false;
+    });
+  }
+
+  function submitCycleCount(rawQty) {
+    if (!cycleCount) return;
+    if (rawQty === "" || rawQty == null) { toast("Enter a quantity of 0 or more.", true); return; }
+    var qty = Math.round(Number(rawQty));
+    if (isNaN(qty) || qty < 0) { toast("Enter a quantity of 0 or more.", true); return; }
+    applyCycleCount(cycleCount.locationId, cycleCount.partId, qty).then(function (ok) {
+      if (ok) { cycleCount = null; render(); }
+    });
+  }
+
+  function renderCycleCountBox() {
+    var html = '<div class="panel" style="margin-bottom:22px;">' +
+      '<div class="section-title" style="margin-top:0;">Cycle count</div>';
+
+    if (!cycleCount) {
+      html += '<p class="hint" style="margin:0 0 12px;">Spot-check a random location and part against what’s actually on the shelf.</p>' +
+        '<button class="btn btn-accent" type="button" id="cycle-start">Start a cycle count</button>';
+    } else {
+      var loc = getLocationById(cycleCount.locationId);
+      var part = getPart(cycleCount.partId);
+      if (!loc || !part) {
+        html += '<p class="hint" style="margin:0 0 12px;">That location or part is no longer available.</p>' +
+          '<button class="btn btn-accent" type="button" id="cycle-start">Start a cycle count</button>';
+      } else {
+        html += '<p style="margin:0 0 12px;">Go check <strong>' + esc(part.name) + '</strong> at <strong>' + esc(loc.name) + '</strong>.</p>' +
+          '<div class="form-row">' +
+            '<input type="number" id="cycle-qty-input" min="0" placeholder="Actual quantity found" />' +
+            '<button class="btn btn-accent" type="button" id="cycle-submit" style="flex:0 0 auto;">Save count</button>' +
+          '</div>' +
+          '<button class="btn btn-ghost btn-sm" type="button" id="cycle-skip" style="margin-top:10px;">Skip to a different one</button>';
+      }
+    }
+    html += '</div>';
     return html;
   }
 
@@ -767,7 +826,7 @@
     rows.forEach(function (r) { stockedIds[r.partId] = true; });
     var available = state.parts.filter(function (p) { return !stockedIds[p.id]; }).sort(function (a, b) { return a.name.localeCompare(b.name); });
 
-    var html = '<div class="crumb"><a href="#/locations">Locations</a> / ' + esc(loc.name) + '</div>' +
+    var html = '<div class="crumb"><a href="#/locations">Setup</a> / ' + esc(loc.name) + '</div>' +
       '<h1>' + esc(loc.name) + '</h1>' +
       (loc.notes ? '<p class="hint" style="margin-top:6px;">' + esc(loc.notes) + '</p>' : '');
 
@@ -1071,6 +1130,7 @@
   // entered as Section-Aisle-Bay-Shelf (the same four auto-advancing boxes as "Add a
   // location") or resolved by scanning its QR label.
   var flow = null; // { kind: "add" | "move" | "pull", partId, section, aisle, bay, shelf, fromId, qty }
+  var cycleCount = null; // { locationId, partId } — the current in-progress cycle count pick, or null
 
   function getLocationByParts(section, aisle, bay, shelf) {
     var s = (section || "").trim().toUpperCase();
@@ -1249,10 +1309,6 @@
     var kind = form.dataset.form;
     var fd = new FormData(form);
 
-    if (kind === "search") {
-      window.location.hash = "#/?q=" + encodeURIComponent(fd.get("q") || "");
-      return;
-    }
     if (kind === "partSearch") {
       window.location.hash = "#/parts?q=" + encodeURIComponent(fd.get("q") || "");
       return;
@@ -1322,7 +1378,16 @@
       var qtyInput = document.getElementById("pull-qty-input");
       var qty = qtyInput ? Number(qtyInput.value) || 1 : 1;
       openPullFlow(pullBtn.dataset.pull, qty);
+      return;
     }
+    if (e.target.id === "cycle-start" || e.target.id === "cycle-skip") { startCycleCount(); return; }
+    if (e.target.id === "cycle-submit") {
+      var cycleInput = document.getElementById("cycle-qty-input");
+      submitCycleCount(cycleInput ? cycleInput.value : "");
+      return;
+    }
+    var delLocBtn = e.target.closest("[data-delete-location]");
+    if (delLocBtn) { deleteLocation(delLocBtn.dataset.deleteLocation); return; }
   });
 
   // Auto-advance focus through the Section-Aisle-Bay-Shelf boxes as each one fills up.
@@ -1417,6 +1482,11 @@
             return client.from(table).update(row).eq("id", id).then(function (res) {
               if (res.error) throw res.error;
             });
+          },
+          delete: function () {
+            return client.from(table).delete().eq("id", id).then(function (res) {
+              if (res.error) throw res.error;
+            });
           }
         };
       }
@@ -1491,6 +1561,12 @@
           },
           update: function (fields) {
             data[coll][id] = Object.assign({}, data[coll][id] || {}, fields);
+            persist();
+            notify(coll);
+            return Promise.resolve();
+          },
+          delete: function () {
+            delete data[coll][id];
             persist();
             notify(coll);
             return Promise.resolve();
