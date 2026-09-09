@@ -2,7 +2,7 @@
 <title>Clean Inventory</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600;700&display=swap">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.4.0/jsQR.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.116.0/dist/umd/supabase.js"></script>
 <style>
   :root {
@@ -284,8 +284,8 @@
     box-shadow: 0 0 0 999px rgba(0,0,0,0.25);
   }
   .scan-status { margin: 12px 0 0; font-size: 0.85em; color: var(--muted); min-height: 1.3em; }
-  .scan-manual { display: flex; gap: 8px; margin-top: 12px; }
-  .scan-manual input { flex: 1; }
+  .scan-manual { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px; margin-top: 12px; }
+  .scan-manual > input { flex: 1; }
   .flow-error { color: var(--danger); font-size: 0.85em; min-height: 1.2em; margin: 0; }
 
   @media print {
@@ -355,8 +355,16 @@
       </div>
       <p class="scan-status" id="scan-status">Requesting camera access…</p>
       <form class="scan-manual" id="scan-manual-form">
-        <input type="text" id="scan-manual-input" placeholder="Or type the location code" autocomplete="off" />
-        <button class="btn btn-ink btn-sm" type="submit">Go</button>
+        <div class="loc-parts-row">
+          <label class="loc-part-field"><span class="loc-part-label">Section</span><input type="text" id="scan-manual-section" class="loc-part-input" maxlength="1" placeholder="X" autocomplete="off" /></label>
+          <span class="loc-part-sep">–</span>
+          <label class="loc-part-field"><span class="loc-part-label">Aisle</span><input type="text" id="scan-manual-aisle" class="loc-part-input" maxlength="2" placeholder="XX" autocomplete="off" /></label>
+          <span class="loc-part-sep">–</span>
+          <label class="loc-part-field"><span class="loc-part-label">Bay</span><input type="text" id="scan-manual-bay" class="loc-part-input" maxlength="2" placeholder="XX" autocomplete="off" /></label>
+          <span class="loc-part-sep">–</span>
+          <label class="loc-part-field"><span class="loc-part-label">Shelf</span><input type="text" id="scan-manual-shelf" class="loc-part-input" maxlength="2" placeholder="XX" autocomplete="off" /></label>
+        </div>
+        <button class="btn btn-accent btn-sm" type="submit">Go</button>
       </form>
     </div>
   </div>
@@ -914,6 +922,17 @@
     return null;
   }
 
+  function useLocation(loc) {
+    var onResolve = scanner.onResolve;
+    closeScanner();
+    if (onResolve) {
+      onResolve(loc);
+    } else {
+      window.location.hash = "#/l/" + loc.code;
+      toast("Opened " + loc.name + ".");
+    }
+  }
+
   function goToScannedCode(raw) {
     var code = extractLocationCode(raw);
     if (!code) {
@@ -925,28 +944,36 @@
       document.getElementById("scan-status").textContent = "No location matches that code.";
       return false;
     }
-    var onResolve = scanner.onResolve;
-    closeScanner();
-    if (onResolve) {
-      onResolve(loc);
-    } else {
-      window.location.hash = "#/l/" + code;
-      toast("Opened " + loc.name + ".");
-    }
+    useLocation(loc);
     return true;
   }
 
   function scanTick() {
     if (!scanner.active) return;
+    if (typeof jsQR === "undefined") {
+      document.getElementById("scan-status").textContent =
+        "The QR scanning library didn't load — enter the location's Section-Aisle-Bay-Shelf below instead.";
+      return;
+    }
     var video = document.getElementById("scan-video");
-    if (video.readyState === video.HAVE_ENOUGH_DATA && typeof jsQR !== "undefined") {
+    if (video.readyState === video.HAVE_ENOUGH_DATA) {
       var canvas = scanner.canvas;
       canvas.width = video.videoWidth;
       canvas.height = video.videoHeight;
       var ctx = canvas.getContext("2d");
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
       var frame;
-      try { frame = ctx.getImageData(0, 0, canvas.width, canvas.height); } catch (e) { frame = null; }
+      try {
+        frame = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        scanner.frameErrors = 0;
+      } catch (e) {
+        frame = null;
+        scanner.frameErrors = (scanner.frameErrors || 0) + 1;
+        if (scanner.frameErrors === 20) {
+          document.getElementById("scan-status").textContent =
+            "Couldn't read the camera image in this browser — enter the location's Section-Aisle-Bay-Shelf below instead.";
+        }
+      }
       if (frame) {
         var code = jsQR(frame.data, frame.width, frame.height, { inversionAttempts: "dontInvert" });
         if (code && code.data) {
@@ -959,11 +986,15 @@
 
   function openScanner(onResolve) {
     scanner.onResolve = onResolve || null;
+    scanner.frameErrors = 0;
     var modal = document.getElementById("scan-modal");
     var status = document.getElementById("scan-status");
     modal.hidden = false;
     status.textContent = "Requesting camera access…";
-    document.getElementById("scan-manual-input").value = "";
+    ["scan-manual-section", "scan-manual-aisle", "scan-manual-bay", "scan-manual-shelf"].forEach(function (id) {
+      var el = document.getElementById(id);
+      if (el) el.value = "";
+    });
 
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
       status.textContent = "Camera access isn't available here — type the location code below instead.";
@@ -1003,7 +1034,17 @@
   });
   document.getElementById("scan-manual-form").addEventListener("submit", function (e) {
     e.preventDefault();
-    goToScannedCode(document.getElementById("scan-manual-input").value);
+    var loc = getLocationByParts(
+      document.getElementById("scan-manual-section").value,
+      document.getElementById("scan-manual-aisle").value,
+      document.getElementById("scan-manual-bay").value,
+      document.getElementById("scan-manual-shelf").value
+    );
+    if (!loc) {
+      document.getElementById("scan-status").textContent = "No location matches that Section-Aisle-Bay-Shelf.";
+      return;
+    }
+    useLocation(loc);
   });
 
   // ---------- add / move / pick flows ----------
