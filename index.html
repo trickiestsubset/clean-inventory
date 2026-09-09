@@ -562,6 +562,23 @@
     });
   }
 
+  function deletePart(partId) {
+    var part = getPart(partId);
+    if (!part) return;
+    var stocked = locationsForPart(partId);
+    if (stocked.length) {
+      toast("Pull " + part.name + " from every location before deleting it (still stocked in " + stocked.length + " location" + (stocked.length === 1 ? "" : "s") + ").", true);
+      return;
+    }
+    if (!window.confirm('Delete "' + part.name + '"? This can\'t be undone.')) return;
+    db.doc("parts/" + partId).delete().then(function () {
+      toast("Deleted " + part.name + ".");
+      window.location.hash = "#/parts";
+    }).catch(function (e) {
+      toast("Couldn't delete that part: " + e.message, true);
+    });
+  }
+
   function createPart(name, sku, description, photoDataUrl) {
     return db.collection("parts").add({
       name: name, sku: sku || null, description: description || null,
@@ -675,6 +692,13 @@
 
   // ---------- view: locations / setup ----------
   function renderLocations() {
+    var params = new URLSearchParams(window.location.hash.split("?")[1] || "");
+    var qSection = params.get("section") || "";
+    var qAisle = params.get("aisle") || "";
+    var qBay = params.get("bay") || "";
+    var qShelf = params.get("shelf") || "";
+    var searched = qSection || qAisle || qBay || qShelf;
+
     var html = '<div class="view-head"><h1>Setup</h1>' +
       (state.locations.length ? '<a href="#/locations/print" class="btn btn-ghost btn-sm">Print QR labels for all locations</a>' : '') +
       '</div>';
@@ -703,19 +727,32 @@
     '</div>';
 
     html += '<div class="panel">' +
-      '<div class="section-title" style="margin-top:0;">Manage locations</div>';
-    if (!state.locations.length) {
-      html += '<p class="empty-state">No locations yet. Add one above, then print its QR code and stick it on the shelf or bin.</p>';
-    } else {
-      var sorted = state.locations.slice().sort(function (a, b) { return a.name.localeCompare(b.name); });
-      html += '<ul class="activity-list">' + sorted.map(function (loc) {
-        return '<li class="activity-row">' +
-          '<span><a href="#/l/' + esc(loc.code) + '">' + esc(loc.name) + '</a>' +
-            (loc.notes ? ' <span class="hint">' + esc(loc.notes) + '</span>' : '') +
+      '<div class="section-title" style="margin-top:0;">Find a location</div>' +
+      '<form class="form-grid" data-form="locationSearch">' +
+        '<div class="loc-parts-row">' +
+          '<label class="loc-part-field"><span class="loc-part-label">Section</span><input type="text" name="section" class="loc-part-input" maxlength="1" placeholder="X" value="' + esc(qSection) + '" /></label>' +
+          '<span class="loc-part-sep">–</span>' +
+          '<label class="loc-part-field"><span class="loc-part-label">Aisle</span><input type="text" name="aisle" class="loc-part-input" maxlength="2" placeholder="XX" value="' + esc(qAisle) + '" /></label>' +
+          '<span class="loc-part-sep">–</span>' +
+          '<label class="loc-part-field"><span class="loc-part-label">Bay</span><input type="text" name="bay" class="loc-part-input" maxlength="2" placeholder="XX" value="' + esc(qBay) + '" /></label>' +
+          '<span class="loc-part-sep">–</span>' +
+          '<label class="loc-part-field"><span class="loc-part-label">Shelf</span><input type="text" name="shelf" class="loc-part-input" maxlength="2" placeholder="XX" value="' + esc(qShelf) + '" /></label>' +
+          '<button class="btn btn-accent btn-sm" type="submit" style="margin-left:4px;">Find</button>' +
+        '</div>' +
+      '</form>';
+
+    if (searched) {
+      var found = getLocationByParts(qSection, qAisle, qBay, qShelf);
+      if (!found) {
+        html += '<p class="empty-state" style="margin-top:14px;">No location matches that Section-Aisle-Bay-Shelf.</p>';
+      } else {
+        html += '<ul class="activity-list" style="margin-top:14px;"><li class="activity-row">' +
+          '<span><a href="#/l/' + esc(found.code) + '">' + esc(found.name) + '</a>' +
+            (found.notes ? ' <span class="hint">' + esc(found.notes) + '</span>' : '') +
           '</span>' +
-          '<button class="btn btn-danger btn-sm" type="button" data-delete-location="' + loc.id + '">Delete</button>' +
-        '</li>';
-      }).join("") + '</ul>';
+          '<button class="btn btn-danger btn-sm" type="button" data-delete-location="' + found.id + '">Delete</button>' +
+        '</li></ul>';
+      }
     }
     html += '</div>';
     return html;
@@ -1007,6 +1044,11 @@
       '<div class="photo-input-row"><input type="file" accept="image/*" capture="environment" data-photo /><img class="photo-preview" alt="" /></div>' +
       '<button class="btn btn-accent" type="submit" style="justify-self:start;">Save changes</button>' +
     '</form>';
+
+    html += '<div class="panel" style="margin-top:16px;">' +
+      '<div class="section-title" style="margin-top:0;">Delete part</div>' +
+      '<button class="btn btn-danger btn-sm" type="button" data-delete-part="' + part.id + '">Delete part</button>' +
+    '</div>';
     return html;
   }
 
@@ -1363,6 +1405,19 @@
       createLocation(section, aisle, bay, shelf, (fd.get("notes") || "").trim());
       return;
     }
+    if (kind === "locationSearch") {
+      var qp = new URLSearchParams();
+      var lsSection = (fd.get("section") || "").trim();
+      var lsAisle = (fd.get("aisle") || "").trim();
+      var lsBay = (fd.get("bay") || "").trim();
+      var lsShelf = (fd.get("shelf") || "").trim();
+      if (lsSection) qp.set("section", lsSection);
+      if (lsAisle) qp.set("aisle", lsAisle);
+      if (lsBay) qp.set("bay", lsBay);
+      if (lsShelf) qp.set("shelf", lsShelf);
+      window.location.hash = "#/locations?" + qp.toString();
+      return;
+    }
     if (kind === "createPart") {
       var pname = (fd.get("name") || "").trim();
       if (!pname) return;
@@ -1415,6 +1470,8 @@
     if (e.target.id === "cycle-start") { startCycleCount(); return; }
     var delLocBtn = e.target.closest("[data-delete-location]");
     if (delLocBtn) { deleteLocation(delLocBtn.dataset.deleteLocation); return; }
+    var delPartBtn = e.target.closest("[data-delete-part]");
+    if (delPartBtn) { deletePart(delPartBtn.dataset.deletePart); return; }
   });
 
   // Auto-advance focus through the Section-Aisle-Bay-Shelf boxes as each one fills up.
