@@ -1027,7 +1027,7 @@
     scanner.onResolve = null;
   }
 
-  document.getElementById("scan-fab").addEventListener("click", openScanner);
+  document.getElementById("scan-fab").addEventListener("click", function () { openScanner(); });
   document.getElementById("scan-close").addEventListener("click", closeScanner);
   document.getElementById("scan-modal").addEventListener("click", function (e) {
     if (e.target.id === "scan-modal") closeScanner();
