@@ -8,10 +8,21 @@ create table if not exists locations (
   id uuid primary key default gen_random_uuid(),
   code text unique not null,
   name text not null,
+  section text,
+  aisle text,
+  bay text,
+  shelf text,
   notes text,
   created_at bigint,
   recent_activity jsonb not null default '[]'::jsonb
 );
+
+-- Migration for a locations table created before section/aisle/bay/shelf existed —
+-- harmless no-ops if the columns are already there.
+alter table locations add column if not exists section text;
+alter table locations add column if not exists aisle text;
+alter table locations add column if not exists bay text;
+alter table locations add column if not exists shelf text;
 
 create table if not exists parts (
   id uuid primary key default gen_random_uuid(),

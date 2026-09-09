@@ -170,6 +170,18 @@
   .form-grid { display: grid; gap: 10px; }
   .form-row { display: flex; gap: 8px; flex-wrap: wrap; }
   .form-row > * { flex: 1; min-width: 140px; }
+
+  .loc-parts-row { display: flex; align-items: flex-end; gap: 6px; flex-wrap: wrap; }
+  .loc-part-field { display: flex; flex-direction: column; gap: 4px; }
+  .loc-part-label {
+    font-family: var(--font-mono); font-size: 0.7em; letter-spacing: 0.06em;
+    text-transform: uppercase; color: var(--muted);
+  }
+  .loc-part-input {
+    width: 3.4em; text-align: center; text-transform: uppercase;
+    font-family: var(--font-mono); font-weight: 700; letter-spacing: 0.04em;
+  }
+  .loc-part-sep { color: var(--faint); font-weight: 700; padding-bottom: 0.6em; }
   .hint { color: var(--faint); font-size: 0.82em; }
   .msg-banner {
     border-radius: var(--radius-sm); padding: 10px 14px; font-size: 0.9em; margin-bottom: 16px;
@@ -485,9 +497,16 @@
     }).catch(function () {});
   }
 
-  function createLocation(name, notes) {
+  function locationLabel(section, aisle, bay, shelf) {
+    return [section, aisle, bay, shelf].map(function (s) { return String(s || "").toUpperCase(); }).join("-");
+  }
+
+  function createLocation(section, aisle, bay, shelf, notes) {
+    var name = locationLabel(section, aisle, bay, shelf);
     return db.collection("locations").add({
-      code: genCode(6), name: name, notes: notes || null, createdAt: Date.now(), recentActivity: []
+      code: genCode(6), name: name,
+      section: section.toUpperCase(), aisle: aisle.toUpperCase(), bay: bay.toUpperCase(), shelf: shelf.toUpperCase(),
+      notes: notes || null, createdAt: Date.now(), recentActivity: []
     }).then(function () { toast("Location created."); }).catch(function (e) { toast(e.message, true); });
   }
 
@@ -653,10 +672,20 @@
 
     html += '<div class="panel" style="margin-bottom:22px;">' +
       '<div class="section-title" style="margin-top:0;">Add a location</div>' +
-      '<form class="form-row" data-form="createLocation">' +
-        '<input type="text" name="name" placeholder="e.g. Shelf A3, Van 2 drawer 4" required data-autofocus />' +
-        '<input type="text" name="notes" placeholder="Notes (optional)" />' +
-        '<button class="btn btn-accent" type="submit" style="flex:0 0 auto;">Create + generate QR</button>' +
+      '<form class="form-grid" data-form="createLocation">' +
+        '<div class="loc-parts-row">' +
+          '<label class="loc-part-field"><span class="loc-part-label">Section / Area</span><input type="text" name="section" class="loc-part-input" maxlength="2" placeholder="XX" required data-autofocus /></label>' +
+          '<span class="loc-part-sep">–</span>' +
+          '<label class="loc-part-field"><span class="loc-part-label">Aisle</span><input type="text" name="aisle" class="loc-part-input" maxlength="2" placeholder="XX" required /></label>' +
+          '<span class="loc-part-sep">–</span>' +
+          '<label class="loc-part-field"><span class="loc-part-label">Bay</span><input type="text" name="bay" class="loc-part-input" maxlength="2" placeholder="XX" required /></label>' +
+          '<span class="loc-part-sep">–</span>' +
+          '<label class="loc-part-field"><span class="loc-part-label">Shelf</span><input type="text" name="shelf" class="loc-part-input" maxlength="2" placeholder="XX" required /></label>' +
+        '</div>' +
+        '<div class="form-row">' +
+          '<input type="text" name="notes" placeholder="Notes (optional)" />' +
+          '<button class="btn btn-accent" type="submit" style="flex:0 0 auto;">Create + generate QR</button>' +
+        '</div>' +
       '</form>' +
     '</div>';
 
@@ -968,9 +997,17 @@
       return;
     }
     if (kind === "createLocation") {
-      var name = (fd.get("name") || "").trim();
-      if (!name) return;
-      createLocation(name, (fd.get("notes") || "").trim());
+      var section = (fd.get("section") || "").trim();
+      var aisle = (fd.get("aisle") || "").trim();
+      var bay = (fd.get("bay") || "").trim();
+      var shelf = (fd.get("shelf") || "").trim();
+      var badField = [["Section/area", section], ["Aisle", aisle], ["Bay", bay], ["Shelf", shelf]]
+        .find(function (f) { return f[1].length !== 2; });
+      if (badField) {
+        toast(badField[0] + " needs to be exactly 2 characters (e.g. \"01\" or \"A3\").", true);
+        return;
+      }
+      createLocation(section, aisle, bay, shelf, (fd.get("notes") || "").trim());
       return;
     }
     if (kind === "createPart") {
@@ -1023,7 +1060,7 @@
   var SUPABASE_ANON_KEY = "sb_publishable_bN2qxXdk7vT3po8KwSIL2w_pp3GM5PA";
 
   var SUPABASE_FIELDS = {
-    locations: { code: "code", name: "name", notes: "notes", createdAt: "created_at", recentActivity: "recent_activity" },
+    locations: { code: "code", name: "name", section: "section", aisle: "aisle", bay: "bay", shelf: "shelf", notes: "notes", createdAt: "created_at", recentActivity: "recent_activity" },
     parts: { name: "name", sku: "sku", description: "description", photoDataUrl: "photo_data_url", createdAt: "created_at", recentActivity: "recent_activity" },
     inventory: { locationId: "location_id", partId: "part_id", quantity: "quantity", updatedAt: "updated_at" }
   };
