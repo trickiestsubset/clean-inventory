@@ -3,6 +3,7 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600;700&display=swap">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.4.0/jsQR.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.116.0/dist/umd/supabase.js"></script>
 <style>
   :root {
     --bg: #f2f3ef;
@@ -1017,7 +1018,95 @@
 
   window.addEventListener("hashchange", render);
 
-  // ---------- local fallback storage (used when not running as a Claude artifact) ----------
+  // ---------- Supabase backend (primary data store) ----------
+  var SUPABASE_URL = "https://iyumqmcwuosajgnhqyhy.supabase.co";
+  var SUPABASE_ANON_KEY = "sb_publishable_bN2qxXdk7vT3po8KwSIL2w_pp3GM5PA";
+
+  var SUPABASE_FIELDS = {
+    locations: { code: "code", name: "name", notes: "notes", createdAt: "created_at", recentActivity: "recent_activity" },
+    parts: { name: "name", sku: "sku", description: "description", photoDataUrl: "photo_data_url", createdAt: "created_at", recentActivity: "recent_activity" },
+    inventory: { locationId: "location_id", partId: "part_id", quantity: "quantity", updatedAt: "updated_at" }
+  };
+
+  function toRow(table, obj) {
+    var map = SUPABASE_FIELDS[table], row = {};
+    for (var k in map) {
+      if (Object.prototype.hasOwnProperty.call(obj, k)) row[map[k]] = obj[k];
+    }
+    return row;
+  }
+  function fromRow(table, row) {
+    var map = SUPABASE_FIELDS[table], obj = {};
+    for (var k in map) obj[k] = row[map[k]];
+    if (table !== "inventory" && obj.recentActivity == null) obj.recentActivity = [];
+    return obj;
+  }
+
+  function SupabaseDB(client) {
+    function fetchAndEmit(table, cb, errCb) {
+      client.from(table).select("*").then(function (res) {
+        if (res.error) { errCb && errCb(res.error); return; }
+        var docs = res.data.map(function (row) {
+          return { id: row.id, data: function () { return fromRow(table, row); } };
+        });
+        cb({ docs: docs });
+      });
+    }
+
+    return {
+      collection: function (name) {
+        return {
+          add: function (obj) {
+            return client.from(name).insert(toRow(name, obj)).select().then(function (res) {
+              if (res.error) throw res.error;
+              var inserted = res.data && res.data[0];
+              return { id: inserted ? inserted.id : null };
+            });
+          },
+          onSnapshot: function (cb, errCb) {
+            fetchAndEmit(name, cb, errCb);
+            var channel = client.channel(name + "-changes")
+              .on("postgres_changes", { event: "*", schema: "public", table: name }, function () {
+                fetchAndEmit(name, cb, errCb);
+              })
+              .subscribe(function (status) {
+                if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+                  toast("Live updates for " + name + " aren't connected — reload to see others' changes.", true);
+                }
+              });
+            return function unsubscribe() { client.removeChannel(channel); };
+          }
+        };
+      },
+      doc: function (path) {
+        var parts = path.split("/");
+        var table = parts[0], id = parts[1];
+        return {
+          get: function () {
+            return client.from(table).select("*").eq("id", id).maybeSingle().then(function (res) {
+              if (res.error) throw res.error;
+              return { exists: !!res.data, data: function () { return res.data ? fromRow(table, res.data) : undefined; } };
+            });
+          },
+          set: function (obj) {
+            var row = toRow(table, obj);
+            row.id = id;
+            return client.from(table).upsert(row, { onConflict: "id" }).then(function (res) {
+              if (res.error) throw res.error;
+            });
+          },
+          update: function (fields) {
+            var row = toRow(table, fields);
+            return client.from(table).update(row).eq("id", id).then(function (res) {
+              if (res.error) throw res.error;
+            });
+          }
+        };
+      }
+    };
+  }
+
+  // ---------- local fallback storage (used only if the Supabase library fails to load) ----------
   function LocalDB() {
     var STORAGE_KEY = "ci_local_db_v1";
     var data = {};
@@ -1117,17 +1206,14 @@
 
   function boot() {
     render();
-    if (window.claude && window.claude.use) {
-      window.claude.use("db").then(function (namespace) {
-        db = namespace || LocalDB();
-        wireDb();
-      }).catch(function () {
-        db = LocalDB();
-        wireDb();
-      });
+    if (window.supabase && window.supabase.createClient) {
+      var client = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+      db = SupabaseDB(client);
+      wireDb();
     } else {
-      // Running outside claude.ai (opened directly, or served from a local dev server) —
-      // fall back to a browser-local store so the app is still fully usable.
+      // The Supabase client library didn't load (offline, or the CDN is blocked) —
+      // fall back to a browser-local store so the app still works for this one device.
+      toast("Couldn't reach the shared database — using local-only storage for now.", true);
       db = LocalDB();
       wireDb();
     }
