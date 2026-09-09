@@ -829,7 +829,7 @@
   function renderPrintLabels() {
     var sorted = state.locations.slice().sort(function (a, b) { return a.name.localeCompare(b.name); });
     var html = '<div class="view-head no-print"><h1>Print QR labels</h1>' +
-      '<button class="btn btn-ink" onclick="window.print()">Print</button></div>';
+      '<button class="btn btn-accent" onclick="window.print()">Print</button></div>';
     html += '<div class="print-grid">' + sorted.map(function (loc) {
       return '<div class="print-tile"><div class="qr-box" style="display:inline-block;"><div data-qr="' + esc(loc.code) + '" data-qr-size="160"></div></div>' +
         '<div class="loc-name" style="margin-top:8px;">' + esc(loc.name) + '</div></div>';
@@ -841,7 +841,7 @@
     var loc = getLocationByCode(code);
     if (!loc) return '<p class="empty-state">No location found for this QR code.</p>';
     var html = '<div class="view-head no-print"><h1>Print QR code</h1>' +
-      '<button class="btn btn-ink" onclick="window.print()">Print</button></div>';
+      '<button class="btn btn-accent" onclick="window.print()">Print</button></div>';
     html += '<div class="print-grid">' +
       '<div class="print-tile"><div class="qr-box" style="display:inline-block;"><div data-qr="' + esc(loc.code) + '" data-qr-size="160"></div></div>' +
         '<div class="loc-name" style="margin-top:8px;">' + esc(loc.name) + '</div></div>' +
