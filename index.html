@@ -742,17 +742,7 @@
       '</form>';
 
     if (searched) {
-      var found = getLocationByParts(qSection, qAisle, qBay, qShelf);
-      if (!found) {
-        html += '<p class="empty-state" style="margin-top:14px;">No location matches that Section-Aisle-Bay-Shelf.</p>';
-      } else {
-        html += '<ul class="activity-list" style="margin-top:14px;"><li class="activity-row">' +
-          '<span><a href="#/l/' + esc(found.code) + '">' + esc(found.name) + '</a>' +
-            (found.notes ? ' <span class="hint">' + esc(found.notes) + '</span>' : '') +
-          '</span>' +
-          '<button class="btn btn-danger btn-sm" type="button" data-delete-location="' + found.id + '">Delete</button>' +
-        '</li></ul>';
-      }
+      html += '<p class="empty-state" style="margin-top:14px;">No location matches that Section-Aisle-Bay-Shelf.</p>';
     }
     html += '</div>';
     return html;
@@ -940,6 +930,11 @@
       '</form>';
     }
     html += '</div>';
+
+    html += '<div class="panel" style="margin-top:16px;">' +
+      '<div class="section-title" style="margin-top:0;">Delete location</div>' +
+      '<button class="btn btn-danger btn-sm" type="button" data-delete-location="' + loc.id + '">Delete location</button>' +
+    '</div>';
     return html;
   }
 
@@ -1406,11 +1401,16 @@
       return;
     }
     if (kind === "locationSearch") {
-      var qp = new URLSearchParams();
       var lsSection = (fd.get("section") || "").trim();
       var lsAisle = (fd.get("aisle") || "").trim();
       var lsBay = (fd.get("bay") || "").trim();
       var lsShelf = (fd.get("shelf") || "").trim();
+      var lsFound = getLocationByParts(lsSection, lsAisle, lsBay, lsShelf);
+      if (lsFound) {
+        window.location.hash = "#/l/" + lsFound.code;
+        return;
+      }
+      var qp = new URLSearchParams();
       if (lsSection) qp.set("section", lsSection);
       if (lsAisle) qp.set("aisle", lsAisle);
       if (lsBay) qp.set("bay", lsBay);
