@@ -330,7 +330,7 @@
     <div class="scan-modal">
       <div class="scan-modal-head">
         <h2 style="font-size:1em;">Cycle count</h2>
-        <button class="btn btn-ghost btn-sm" id="cycle-close" type="button">Close</button>
+        <button class="btn btn-accent btn-sm" id="cycle-close" type="button">Close</button>
       </div>
       <div id="cycle-body"></div>
     </div>
@@ -340,7 +340,7 @@
     <div class="scan-modal">
       <div class="scan-modal-head">
         <h2 style="font-size:1em;" id="flow-title"></h2>
-        <button class="btn btn-ghost btn-sm" id="flow-close" type="button">Close</button>
+        <button class="btn btn-accent btn-sm" id="flow-close" type="button">Close</button>
       </div>
       <div id="flow-body"></div>
     </div>
@@ -350,7 +350,7 @@
     <div class="scan-modal">
       <div class="scan-modal-head">
         <h2 style="font-size:1em;">Scan a location's QR code</h2>
-        <button class="btn btn-ghost btn-sm" id="scan-close" type="button">Close</button>
+        <button class="btn btn-accent btn-sm" id="scan-close" type="button">Close</button>
       </div>
       <div class="scan-video-wrap">
         <video id="scan-video" playsinline autoplay muted></video>
@@ -430,8 +430,8 @@
     });
   });
 
-  // Passcode gate temporarily disabled - security approach will change later.
-  // (Gate markup/logic above is left in place so it is easy to re-enable.)
+  // Passcode gate temporarily disabled — security approach will change later.
+  // (Gate markup/logic above is left in place so it's easy to re-enable.)
   showApp();
 
   function isReady() { return state.ready.locations && state.ready.parts && state.ready.inventory; }
@@ -700,7 +700,7 @@
     var searched = qSection || qAisle || qBay || qShelf;
 
     var html = '<div class="view-head"><h1>Setup</h1>' +
-      (state.locations.length ? '<a href="#/locations/print" class="btn btn-ghost btn-sm">Print QR labels for all locations</a>' : '') +
+      (state.locations.length ? '<a href="#/locations/print" class="btn btn-accent btn-sm">Print QR labels for all locations</a>' : '') +
       '</div>';
 
     html += '<h2 style="margin-bottom:16px;">Location Maintenance</h2>';
@@ -708,7 +708,7 @@
     html += renderCycleCountBox();
 
     html += '<div class="panel" style="margin-bottom:22px;">' +
-      '<div class="section-title" style="margin-top:0;">Add a location</div>' +
+      '<div class="section-title" style="margin-top:0;">Create location</div>' +
       '<form class="form-grid" data-form="createLocation">' +
         '<div class="loc-parts-row">' +
           '<label class="loc-part-field"><span class="loc-part-label">Section</span><input type="text" name="section" class="loc-part-input" maxlength="1" placeholder="X" required data-autofocus /></label>' +
@@ -727,7 +727,7 @@
     '</div>';
 
     html += '<div class="panel">' +
-      '<div class="section-title" style="margin-top:0;">Find a location</div>' +
+      '<div class="section-title" style="margin-top:0;">Find location</div>' +
       '<form class="form-grid" data-form="locationSearch">' +
         '<div class="loc-parts-row">' +
           '<label class="loc-part-field"><span class="loc-part-label">Section</span><input type="text" name="section" class="loc-part-input" maxlength="1" placeholder="X" value="' + esc(qSection) + '" /></label>' +
@@ -968,15 +968,18 @@
     }
 
     html += '<div class="panel">' +
-      '<div class="section-title" style="margin-top:0;">Add a part to the catalog</div>' +
-      '<p class="hint" style="margin-top:0;">Registers a part without stocking it anywhere yet. To add stock, open a location instead.</p>' +
+      '<div class="section-title" style="margin-top:0;">New part</div>' +
       '<form class="form-grid" data-form="createPart">' +
         '<div class="form-row">' +
           '<input type="text" name="name" placeholder="Part name" required />' +
           '<input type="text" name="sku" placeholder="SKU / part number (optional)" />' +
         '</div>' +
         '<textarea name="description" rows="2" placeholder="Description (optional)"></textarea>' +
-        '<div class="photo-input-row"><input type="file" accept="image/*" capture="environment" data-photo /><img class="photo-preview" alt="" /></div>' +
+        '<div class="photo-input-row">' +
+          '<input type="file" accept="image/*" data-photo style="display:none;" />' +
+          '<button type="button" class="btn btn-accent btn-sm" data-photo-trigger>Add Picture</button>' +
+          '<img class="photo-preview" alt="" />' +
+        '</div>' +
         '<button class="btn btn-accent" type="submit" style="justify-self:start;">Add part</button>' +
       '</form>' +
     '</div>';
@@ -1036,7 +1039,11 @@
         '<input type="text" name="sku" value="' + esc(part.sku || "") + '" placeholder="SKU / part number" />' +
       '</div>' +
       '<textarea name="description" rows="2" placeholder="Description">' + esc(part.description || "") + '</textarea>' +
-      '<div class="photo-input-row"><input type="file" accept="image/*" capture="environment" data-photo /><img class="photo-preview" alt="" /></div>' +
+      '<div class="photo-input-row">' +
+        '<input type="file" accept="image/*" data-photo style="display:none;" />' +
+        '<button type="button" class="btn btn-accent btn-sm" data-photo-trigger>Add Picture</button>' +
+        '<img class="photo-preview" alt="" />' +
+      '</div>' +
       '<button class="btn btn-accent" type="submit" style="justify-self:start;">Save changes</button>' +
     '</form>';
 
@@ -1256,7 +1263,7 @@
         '<label class="loc-part-field"><span class="loc-part-label">Bay</span><input type="text" id="flow-bay" class="loc-part-input" maxlength="2" placeholder="XX" value="' + esc(flow.bay || "") + '" /></label>' +
         '<span class="loc-part-sep">–</span>' +
         '<label class="loc-part-field"><span class="loc-part-label">Shelf</span><input type="text" id="flow-shelf" class="loc-part-input" maxlength="2" placeholder="XX" value="' + esc(flow.shelf || "") + '" /></label>' +
-        '<button class="btn btn-ghost btn-sm" type="button" id="flow-scan" style="margin-left:4px;">Scan</button>' +
+        '<button class="btn btn-accent btn-sm" type="button" id="flow-scan" style="margin-left:4px;">Scan</button>' +
       '</div>';
 
     if (flow.kind === "add") {
@@ -1472,9 +1479,16 @@
     if (delLocBtn) { deleteLocation(delLocBtn.dataset.deleteLocation); return; }
     var delPartBtn = e.target.closest("[data-delete-part]");
     if (delPartBtn) { deletePart(delPartBtn.dataset.deletePart); return; }
+    var photoTrigger = e.target.closest("[data-photo-trigger]");
+    if (photoTrigger) {
+      var photoRow = photoTrigger.closest(".photo-input-row");
+      var photoFileInput = photoRow && photoRow.querySelector("input[data-photo]");
+      if (photoFileInput) photoFileInput.click();
+      return;
+    }
   });
 
-  // Auto-advance focus through the Section-Aisle-Bay-Shelf boxes as each one fills up.
+  // Auto-advance focus through the Section–Aisle–Bay–Shelf boxes as each one fills up.
   // Bound to the whole document (not just #view) since the add/move flow's location boxes
   // live in the static flow-modal markup outside #view.
   document.addEventListener("input", function (e) {
