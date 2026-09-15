@@ -975,11 +975,6 @@
           '<input type="text" name="sku" placeholder="SKU / part number (optional)" />' +
         '</div>' +
         '<textarea name="description" rows="2" placeholder="Description (optional)"></textarea>' +
-        '<div class="photo-input-row">' +
-          '<input type="file" accept="image/*" data-photo style="display:none;" />' +
-          '<button type="button" class="btn btn-accent btn-sm" data-photo-trigger>Add Picture</button>' +
-          '<img class="photo-preview" alt="" />' +
-        '</div>' +
         '<button class="btn btn-accent" type="submit" style="justify-self:start;">Add part</button>' +
       '</form>' +
     '</div>';
@@ -1251,8 +1246,17 @@
     if (!flow) { modal.hidden = true; return; }
     var part = getPart(flow.partId);
     modal.hidden = false;
-    document.getElementById("flow-title").textContent =
-      (flow.kind === "add" ? "Add " : flow.kind === "move" ? "Move " : "Pull ") + (part ? part.name : "this part");
+    var titleEl = document.getElementById("flow-title");
+    if (flow.kind === "add") {
+      titleEl.innerHTML =
+        '<div class="photo-input-row">' +
+          '<input type="file" accept="image/*" data-photo style="display:none;" />' +
+          '<button type="button" class="btn btn-accent btn-sm" data-photo-trigger>Add Picture</button>' +
+          '<img class="photo-preview" alt="" />' +
+        '</div>';
+    } else {
+      titleEl.textContent = (flow.kind === "move" ? "Move " : "Pull ") + (part ? part.name : "this part");
+    }
 
     var locationBoxes =
       '<div class="loc-parts-row">' +
@@ -1329,6 +1333,30 @@
 
     var confirmBtn = document.getElementById("flow-confirm");
     if (confirmBtn) confirmBtn.addEventListener("click", submitFlow);
+
+    var flowPhotoInput = document.querySelector("#flow-title input[data-photo]");
+    var flowPhotoTrigger = document.querySelector("#flow-title [data-photo-trigger]");
+    if (flowPhotoTrigger && flowPhotoInput) {
+      flowPhotoTrigger.addEventListener("click", function () { flowPhotoInput.click(); });
+    }
+    if (flowPhotoInput) {
+      flowPhotoInput.addEventListener("change", function () {
+        var file = flowPhotoInput.files && flowPhotoInput.files[0];
+        var preview = flowPhotoInput.parentElement.querySelector(".photo-preview");
+        if (!file || !flow) return;
+        var partId = flow.partId;
+        flowPhotoInput.disabled = true;
+        compressImage(file).then(function (dataUrl) {
+          if (preview) { preview.src = dataUrl; preview.style.display = "inline-block"; }
+          return db.doc("parts/" + partId).update({ photoDataUrl: dataUrl });
+        }).then(function () {
+          toast("Photo saved.");
+        }).catch(function () {
+          toast("That photo is too large — try a smaller or simpler photo.", true);
+          flowPhotoInput.value = "";
+        }).finally(function () { flowPhotoInput.disabled = false; });
+      });
+    }
   }
 
   function submitFlow() {
@@ -1428,8 +1456,7 @@
     if (kind === "createPart") {
       var pname = (fd.get("name") || "").trim();
       if (!pname) return;
-      var photoInput = form.querySelector("input[data-photo]");
-      createPart(pname, (fd.get("sku") || "").trim(), (fd.get("description") || "").trim(), photoInput ? photoInput.dataset.compressed : null)
+      createPart(pname, (fd.get("sku") || "").trim(), (fd.get("description") || "").trim(), null)
         .then(function (ref) {
           if (ref && ref.id) openAddFlow(ref.id);
         });
