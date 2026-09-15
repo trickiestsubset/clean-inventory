@@ -1247,9 +1247,11 @@
     var part = getPart(flow.partId);
     modal.hidden = false;
     var titleEl = document.getElementById("flow-title");
+    var headEl = document.querySelector("#flow-modal .scan-modal-head");
     if (flow.kind === "add") {
-      titleEl.textContent = "";
+      headEl.hidden = true;
     } else {
+      headEl.hidden = false;
       titleEl.textContent = (flow.kind === "move" ? "Move " : "Pull ") + (part ? part.name : "this part");
     }
 
@@ -1268,7 +1270,12 @@
     if (flow.kind === "add") {
       document.getElementById("flow-body").innerHTML =
         '<div class="form-grid">' +
-          '<label class="hint">Location</label>' + locationBoxes +
+          '<div style="display:flex; align-items:center; justify-content:space-between;">' +
+            '<label class="hint">Location</label>' +
+            '<button class="btn btn-accent btn-sm" type="button" id="flow-close-inline" aria-label="Close">×</button>' +
+          '</div>' +
+          locationBoxes +
+          '<p class="flow-error" id="flow-error"></p>' +
           '<label class="hint">Quantity</label>' +
           '<input type="number" id="flow-qty" min="1" value="' + flow.qty + '" />' +
           '<div class="photo-input-row">' +
@@ -1276,7 +1283,6 @@
             '<button type="button" class="btn btn-accent btn-sm" data-photo-trigger>Add Picture</button>' +
             '<img class="photo-preview" alt="" />' +
           '</div>' +
-          '<p class="flow-error" id="flow-error"></p>' +
           '<button class="btn btn-accent" type="button" id="flow-confirm">Add Part</button>' +
         '</div>';
     } else if (flow.kind === "move" || flow.kind === "pull") {
@@ -1333,6 +1339,9 @@
 
     var confirmBtn = document.getElementById("flow-confirm");
     if (confirmBtn) confirmBtn.addEventListener("click", submitFlow);
+
+    var closeInlineBtn = document.getElementById("flow-close-inline");
+    if (closeInlineBtn) closeInlineBtn.addEventListener("click", closeFlow);
 
     var flowPhotoInput = document.querySelector("#flow-body input[data-photo]");
     var flowPhotoTrigger = document.querySelector("#flow-body [data-photo-trigger]");
