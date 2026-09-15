@@ -1214,7 +1214,9 @@
 
   function flowError(msg) {
     var el = document.getElementById("flow-error");
-    if (el) el.textContent = msg || "";
+    if (!el) return;
+    el.textContent = msg || "";
+    el.hidden = !msg;
   }
 
   function closeFlow() {
@@ -1275,7 +1277,7 @@
             '<button class="btn btn-accent btn-sm" type="button" id="flow-close-inline" aria-label="Close">×</button>' +
           '</div>' +
           locationBoxes +
-          '<p class="flow-error" id="flow-error"></p>' +
+          '<p class="flow-error" id="flow-error" hidden></p>' +
           '<label class="hint">Quantity</label>' +
           '<input type="number" id="flow-qty" min="1" value="' + flow.qty + '" />' +
           '<div class="photo-input-row">' +
@@ -1300,7 +1302,7 @@
           (flow.kind === "move" ? '<label class="hint">To</label>' + locationBoxes : "") +
           '<label class="hint">Quantity</label>' +
           '<input type="number" id="flow-qty" min="1" value="' + flow.qty + '" />' +
-          '<p class="flow-error" id="flow-error"></p>' +
+          '<p class="flow-error" id="flow-error" hidden></p>' +
           '<button class="btn ' + (flow.kind === "move" ? "btn-accent" : "btn-accent") + '" type="button" id="flow-confirm">' +
             (flow.kind === "move" ? "Move" : "Pull") +
           '</button>' +
