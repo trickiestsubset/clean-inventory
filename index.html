@@ -340,7 +340,7 @@
     <div class="scan-modal">
       <div class="scan-modal-head">
         <h2 style="font-size:1em;" id="flow-title"></h2>
-        <button class="btn btn-accent btn-sm" id="flow-close" type="button">Close</button>
+        <button class="btn btn-accent btn-sm" id="flow-close" type="button" aria-label="Close">×</button>
       </div>
       <div id="flow-body"></div>
     </div>
@@ -1248,12 +1248,7 @@
     modal.hidden = false;
     var titleEl = document.getElementById("flow-title");
     if (flow.kind === "add") {
-      titleEl.innerHTML =
-        '<div class="photo-input-row">' +
-          '<input type="file" accept="image/*" data-photo style="display:none;" />' +
-          '<button type="button" class="btn btn-accent btn-sm" data-photo-trigger>Add Picture</button>' +
-          '<img class="photo-preview" alt="" />' +
-        '</div>';
+      titleEl.textContent = "";
     } else {
       titleEl.textContent = (flow.kind === "move" ? "Move " : "Pull ") + (part ? part.name : "this part");
     }
@@ -1276,8 +1271,13 @@
           '<label class="hint">Location</label>' + locationBoxes +
           '<label class="hint">Quantity</label>' +
           '<input type="number" id="flow-qty" min="1" value="' + flow.qty + '" />' +
+          '<div class="photo-input-row">' +
+            '<input type="file" accept="image/*" data-photo style="display:none;" />' +
+            '<button type="button" class="btn btn-accent btn-sm" data-photo-trigger>Add Picture</button>' +
+            '<img class="photo-preview" alt="" />' +
+          '</div>' +
           '<p class="flow-error" id="flow-error"></p>' +
-          '<button class="btn btn-accent" type="button" id="flow-confirm">Add</button>' +
+          '<button class="btn btn-accent" type="button" id="flow-confirm">Add Part</button>' +
         '</div>';
     } else if (flow.kind === "move" || flow.kind === "pull") {
       var locs = locationsForPart(flow.partId);
@@ -1334,8 +1334,8 @@
     var confirmBtn = document.getElementById("flow-confirm");
     if (confirmBtn) confirmBtn.addEventListener("click", submitFlow);
 
-    var flowPhotoInput = document.querySelector("#flow-title input[data-photo]");
-    var flowPhotoTrigger = document.querySelector("#flow-title [data-photo-trigger]");
+    var flowPhotoInput = document.querySelector("#flow-body input[data-photo]");
+    var flowPhotoTrigger = document.querySelector("#flow-body [data-photo-trigger]");
     if (flowPhotoTrigger && flowPhotoInput) {
       flowPhotoTrigger.addEventListener("click", function () { flowPhotoInput.click(); });
     }
