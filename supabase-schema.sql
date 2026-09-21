@@ -57,6 +57,8 @@ drop policy if exists "public insert locations" on locations;
 create policy "public insert locations" on locations for insert with check (true);
 drop policy if exists "public update locations" on locations;
 create policy "public update locations" on locations for update using (true) with check (true);
+drop policy if exists "public delete locations" on locations;
+create policy "public delete locations" on locations for delete using (true);
 
 drop policy if exists "public select parts" on parts;
 create policy "public select parts" on parts for select using (true);
@@ -64,6 +66,8 @@ drop policy if exists "public insert parts" on parts;
 create policy "public insert parts" on parts for insert with check (true);
 drop policy if exists "public update parts" on parts;
 create policy "public update parts" on parts for update using (true) with check (true);
+drop policy if exists "public delete parts" on parts;
+create policy "public delete parts" on parts for delete using (true);
 
 drop policy if exists "public select inventory" on inventory;
 create policy "public select inventory" on inventory for select using (true);
@@ -71,6 +75,8 @@ drop policy if exists "public insert inventory" on inventory;
 create policy "public insert inventory" on inventory for insert with check (true);
 drop policy if exists "public update inventory" on inventory;
 create policy "public update inventory" on inventory for update using (true) with check (true);
+drop policy if exists "public delete inventory" on inventory;
+create policy "public delete inventory" on inventory for delete using (true);
 
 -- Enable realtime (live sync between devices). If a table is already a member you'll see
 -- a harmless "already member of publication" error — safe to ignore.

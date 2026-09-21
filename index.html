@@ -281,6 +281,10 @@
   .scan-status { margin: 12px 0 0; font-size: 0.85em; color: var(--muted); min-height: 1.3em; }
   .scan-manual { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px; margin-top: 12px; }
   .scan-manual > input { flex: 1; }
+  .barcode-reticle {
+    position: absolute; inset: 38% 8%; border: 2px solid rgba(255,255,255,0.75); border-radius: 8px;
+    box-shadow: 0 0 0 999px rgba(0,0,0,0.25);
+  }
   .flow-error { color: var(--danger); font-size: 0.85em; min-height: 1.2em; margin: 0; }
 
   @media print {
@@ -367,6 +371,24 @@
           <label class="loc-part-field"><span class="loc-part-label">Shelf</span><input type="text" id="scan-manual-shelf" class="loc-part-input" maxlength="2" placeholder="XX" autocomplete="off" /></label>
         </div>
         <button class="btn btn-accent btn-sm" type="submit">Go</button>
+      </form>
+    </div>
+  </div>
+
+  <div class="scan-modal-backdrop" id="barcode-modal" hidden>
+    <div class="scan-modal">
+      <div class="scan-modal-head">
+        <h2 style="font-size:1em;">Scan a barcode</h2>
+        <button class="btn btn-accent btn-sm" id="barcode-close" type="button">Close</button>
+      </div>
+      <div class="scan-video-wrap">
+        <video id="barcode-video" playsinline autoplay muted></video>
+        <div class="barcode-reticle"></div>
+      </div>
+      <p class="scan-status" id="barcode-status">Requesting camera access…</p>
+      <form class="scan-manual" id="barcode-manual-form">
+        <input type="text" id="barcode-manual-input" placeholder="Enter UPC / part number" autocomplete="off" />
+        <button class="btn btn-accent btn-sm" type="submit">Use this</button>
       </form>
     </div>
   </div>
@@ -982,6 +1004,7 @@
         '<div class="form-row">' +
           '<input type="text" name="name" placeholder="Part name" required />' +
           '<input type="text" name="sku" placeholder="SKU / part number (optional)" />' +
+          '<button class="btn btn-accent btn-sm" type="button" data-scan-sku style="flex:0 0 auto;">Scan barcode</button>' +
         '</div>' +
         '<textarea name="description" rows="2" placeholder="Description (optional)"></textarea>' +
         '<button class="btn btn-accent" type="submit" style="justify-self:start;">Add part</button>' +
@@ -1223,6 +1246,134 @@
       return;
     }
     useLocation(loc);
+  });
+
+  // ---------- barcode scanning (UPC on part packaging -> SKU / part number field) ----------
+  var barcodeScanner = { stream: null, rafId: null, active: false, canvas: document.createElement("canvas"), reader: null, onResolve: null, lastScanAt: 0 };
+  var barcodeLibraryPromise = null;
+
+  function loadBarcodeLibrary() {
+    if (typeof ZXing !== "undefined") return Promise.resolve();
+    if (barcodeLibraryPromise) return barcodeLibraryPromise;
+    barcodeLibraryPromise = new Promise(function (resolve, reject) {
+      var script = document.createElement("script");
+      script.src = "https://cdn.jsdelivr.net/npm/@zxing/library@0.20.0/umd/index.min.js";
+      script.onload = resolve;
+      script.onerror = function () { reject(new Error("Barcode scanning library failed to load")); };
+      document.head.appendChild(script);
+    });
+    return barcodeLibraryPromise;
+  }
+
+  function getBarcodeReader() {
+    if (barcodeScanner.reader) return barcodeScanner.reader;
+    var hints = new Map();
+    hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, [
+      ZXing.BarcodeFormat.UPC_A,
+      ZXing.BarcodeFormat.UPC_E,
+      ZXing.BarcodeFormat.EAN_13,
+      ZXing.BarcodeFormat.EAN_8,
+      ZXing.BarcodeFormat.CODE_128,
+      ZXing.BarcodeFormat.CODE_39,
+      ZXing.BarcodeFormat.ITF
+    ]);
+    barcodeScanner.reader = new ZXing.BrowserMultiFormatReader(hints);
+    return barcodeScanner.reader;
+  }
+
+  function resolveBarcodeScan(code) {
+    var onResolve = barcodeScanner.onResolve;
+    closeBarcodeScanner();
+    if (onResolve) onResolve(code);
+  }
+
+  function barcodeTick() {
+    if (!barcodeScanner.active) return;
+    if (typeof ZXing === "undefined") {
+      document.getElementById("barcode-status").textContent = "Loading the barcode scanning library…";
+      barcodeScanner.rafId = setTimeout(function () { barcodeScanner.rafId = requestAnimationFrame(barcodeTick); }, 250);
+      return;
+    }
+    var now = Date.now();
+    if (now - barcodeScanner.lastScanAt < 150) {
+      barcodeScanner.rafId = requestAnimationFrame(barcodeTick);
+      return;
+    }
+    barcodeScanner.lastScanAt = now;
+    var video = document.getElementById("barcode-video");
+    if (video.readyState === video.HAVE_ENOUGH_DATA) {
+      var canvas = barcodeScanner.canvas;
+      var scale = Math.min(1, 800 / Math.max(video.videoWidth, video.videoHeight));
+      canvas.width = Math.max(1, Math.round(video.videoWidth * scale));
+      canvas.height = Math.max(1, Math.round(video.videoHeight * scale));
+      var ctx = canvas.getContext("2d");
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      try {
+        var result = getBarcodeReader().decodeFromCanvas(canvas);
+        if (result && result.getText()) {
+          resolveBarcodeScan(result.getText());
+          return;
+        }
+      } catch (e) {
+        // ZXing throws NotFoundException on every frame with no barcode in view — expected, ignore.
+      }
+    }
+    barcodeScanner.rafId = requestAnimationFrame(barcodeTick);
+  }
+
+  function openBarcodeScanner(onResolve) {
+    barcodeScanner.onResolve = onResolve || null;
+    var modal = document.getElementById("barcode-modal");
+    var status = document.getElementById("barcode-status");
+    modal.hidden = false;
+    document.getElementById("barcode-manual-input").value = "";
+    status.textContent = "Loading scanner and requesting camera access…";
+
+    loadBarcodeLibrary().catch(function () {
+      status.textContent = "The barcode scanning library didn't load — type the UPC/part number below instead.";
+    });
+
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      status.textContent = "Camera access isn't available here — type the UPC/part number below instead.";
+      return;
+    }
+    navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } }).then(function (stream) {
+      barcodeScanner.stream = stream;
+      var video = document.getElementById("barcode-video");
+      video.srcObject = stream;
+      video.play().catch(function () {});
+      barcodeScanner.active = true;
+      status.textContent = "Point the camera at the barcode.";
+      barcodeScanner.rafId = requestAnimationFrame(barcodeTick);
+    }).catch(function (e) {
+      status.textContent = "Couldn't access the camera (" + e.message + ") — type the UPC/part number below instead.";
+    });
+  }
+
+  function closeBarcodeScanner() {
+    barcodeScanner.active = false;
+    if (barcodeScanner.rafId) cancelAnimationFrame(barcodeScanner.rafId);
+    if (barcodeScanner.rafId) clearTimeout(barcodeScanner.rafId);
+    barcodeScanner.rafId = null;
+    barcodeScanner.lastScanAt = 0;
+    if (barcodeScanner.stream) {
+      barcodeScanner.stream.getTracks().forEach(function (t) { t.stop(); });
+      barcodeScanner.stream = null;
+    }
+    var video = document.getElementById("barcode-video");
+    if (video) video.srcObject = null;
+    document.getElementById("barcode-modal").hidden = true;
+    barcodeScanner.onResolve = null;
+  }
+
+  document.getElementById("barcode-close").addEventListener("click", closeBarcodeScanner);
+  document.getElementById("barcode-modal").addEventListener("click", function (e) {
+    if (e.target.id === "barcode-modal") closeBarcodeScanner();
+  });
+  document.getElementById("barcode-manual-form").addEventListener("submit", function (e) {
+    e.preventDefault();
+    var val = document.getElementById("barcode-manual-input").value.trim();
+    if (val) resolveBarcodeScan(val);
   });
 
   // ---------- add / move / pull flows ----------
@@ -1561,6 +1712,18 @@
       if (photoFileInput) photoFileInput.click();
       return;
     }
+    var scanSkuBtn = e.target.closest("[data-scan-sku]");
+    if (scanSkuBtn) {
+      var skuField = scanSkuBtn.closest("form").querySelector('[name="sku"]');
+      openBarcodeScanner(function (code) {
+        if (skuField) {
+          skuField.value = code;
+          skuField.focus();
+        }
+        toast("Scanned barcode " + code + ".");
+      });
+      return;
+    }
   });
 
   // Auto-advance focus through the Section–Aisle–Bay–Shelf boxes as each one fills up.
@@ -1622,22 +1785,37 @@
             var rows = {};
             var loaded = false;
             var pending = [];
-            fetchAndEmit(name, function (snap) {
-              snap.docs.forEach(function (doc) {
+            function applyRows(docs) {
+              rows = {};
+              docs.forEach(function (doc) {
                 rows[doc.id] = toRow(name, doc.data());
                 rows[doc.id].id = doc.id;
               });
-              loaded = true;
-              pending.forEach(function (payload) {
-                var changed = payload.eventType === "DELETE" ? payload.old : payload.new;
-                if (!changed || !changed.id) return;
-                if (payload.eventType === "DELETE") delete rows[changed.id];
-                else rows[changed.id] = changed;
-              });
-              pending = [];
+            }
+            function emit() {
               cb({ docs: Object.keys(rows).map(function (id) {
                 return { id: id, data: function () { return fromRow(name, rows[id]); } };
               }) });
+            }
+            // Supabase only includes primary-key columns in the "old" record for
+            // deletes unless replica identity is FULL, so don't trust payload.old —
+            // resync from the server instead of trying to patch the local cache.
+            function resync() {
+              fetchAndEmit(name, function (snap) {
+                applyRows(snap.docs);
+                emit();
+              }, errCb);
+            }
+            fetchAndEmit(name, function (snap) {
+              applyRows(snap.docs);
+              loaded = true;
+              pending.forEach(function (payload) {
+                if (payload.eventType === "DELETE") { resync(); return; }
+                var changed = payload.new;
+                if (changed && changed.id) rows[changed.id] = changed;
+              });
+              pending = [];
+              emit();
             }, errCb);
             var channel = client.channel(name + "-changes")
               .on("postgres_changes", { event: "*", schema: "public", table: name }, function (payload) {
@@ -1645,13 +1823,14 @@
                   pending.push(payload);
                   return;
                 }
-                var changed = payload.eventType === "DELETE" ? payload.old : payload.new;
+                if (payload.eventType === "DELETE") {
+                  resync();
+                  return;
+                }
+                var changed = payload.new;
                 if (!changed || !changed.id) return;
-                if (payload.eventType === "DELETE") delete rows[changed.id];
-                else rows[changed.id] = changed;
-                cb({ docs: Object.keys(rows).map(function (id) {
-                  return { id: id, data: function () { return fromRow(name, rows[id]); } };
-                }) });
+                rows[changed.id] = changed;
+                emit();
               })
               .subscribe(function (status) {
                 if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
