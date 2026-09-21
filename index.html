@@ -275,16 +275,24 @@
   }
   .scan-video-wrap video { width: 100%; height: 100%; object-fit: cover; display: block; }
   .scan-reticle {
-    position: absolute; inset: 14%; border: 2px solid rgba(255,255,255,0.75); border-radius: 12px;
+    position: absolute; inset: 14%;
     box-shadow: 0 0 0 999px rgba(0,0,0,0.25);
+  }
+  .scan-reticle .reticle-corner {
+    position: absolute; width: 28px; height: 28px; border: 3px solid rgba(255,255,255,0.85);
+  }
+  .scan-reticle .reticle-corner-tl { top: 6%; left: 6%; border-width: 3px 0 0 3px; border-radius: 6px 0 0 0; }
+  .scan-reticle .reticle-corner-tr { top: 6%; right: 6%; border-width: 3px 3px 0 0; border-radius: 0 6px 0 0; }
+  .scan-reticle .reticle-corner-bl { bottom: 6%; left: 6%; border-width: 0 0 3px 3px; border-radius: 0 0 0 6px; }
+  .scan-reticle .reticle-corner-br { bottom: 6%; right: 6%; border-width: 0 3px 3px 0; border-radius: 0 0 6px 0; }
+  .scan-reticle .reticle-line {
+    position: absolute; top: 50%; left: 16%; right: 16%; height: 2px;
+    background: #ef4444; transform: translateY(-50%);
+    box-shadow: 0 0 6px rgba(239, 68, 68, 0.9);
   }
   .scan-status { margin: 12px 0 0; font-size: 0.85em; color: var(--muted); min-height: 1.3em; }
   .scan-manual { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px; margin-top: 12px; }
   .scan-manual > input { flex: 1; }
-  .barcode-reticle {
-    position: absolute; inset: 38% 8%; border: 2px solid rgba(255,255,255,0.75); border-radius: 8px;
-    box-shadow: 0 0 0 999px rgba(0,0,0,0.25);
-  }
   .flow-error { color: var(--danger); font-size: 0.85em; min-height: 1.2em; margin: 0; }
 
   @media print {
@@ -352,12 +360,18 @@
   <div class="scan-modal-backdrop" id="scan-modal" hidden>
     <div class="scan-modal">
       <div class="scan-modal-head">
-        <h2 style="font-size:1em;">Scan a location's QR code</h2>
+        <h2 style="font-size:1em;" id="scan-title">Scan a location's QR code</h2>
         <button class="btn btn-accent btn-sm" id="scan-close" type="button">Close</button>
       </div>
       <div class="scan-video-wrap">
         <video id="scan-video" playsinline autoplay muted></video>
-        <div class="scan-reticle"></div>
+        <div class="scan-reticle" id="scan-reticle">
+          <span class="reticle-corner reticle-corner-tl"></span>
+          <span class="reticle-corner reticle-corner-tr"></span>
+          <span class="reticle-corner reticle-corner-bl"></span>
+          <span class="reticle-corner reticle-corner-br"></span>
+          <span class="reticle-line"></span>
+        </div>
       </div>
       <p class="scan-status" id="scan-status">Requesting camera access…</p>
       <form class="scan-manual" id="scan-manual-form">
@@ -372,21 +386,7 @@
         </div>
         <button class="btn btn-accent btn-sm" type="submit">Go</button>
       </form>
-    </div>
-  </div>
-
-  <div class="scan-modal-backdrop" id="barcode-modal" hidden>
-    <div class="scan-modal">
-      <div class="scan-modal-head">
-        <h2 style="font-size:1em;">Scan a barcode</h2>
-        <button class="btn btn-accent btn-sm" id="barcode-close" type="button">Close</button>
-      </div>
-      <div class="scan-video-wrap">
-        <video id="barcode-video" playsinline autoplay muted></video>
-        <div class="barcode-reticle"></div>
-      </div>
-      <p class="scan-status" id="barcode-status">Requesting camera access…</p>
-      <form class="scan-manual" id="barcode-manual-form">
+      <form class="scan-manual" id="barcode-manual-form" hidden>
         <input type="text" id="barcode-manual-input" placeholder="Enter UPC / part number" autocomplete="off" />
         <button class="btn btn-accent btn-sm" type="submit">Use this</button>
       </form>
@@ -1081,23 +1081,39 @@
     return html;
   }
 
-  // ---------- QR scanning ----------
+  // ---------- scanning (QR codes for locations, barcodes for part UPCs) ----------
+  // One camera/canvas/decode-loop harness backed by ZXing, which reads both symbologies.
+  // scanner.mode picks which formats to decode and which manual-entry fallback to show;
   // scanner.onResolve, when set, redirects a successful scan/manual-entry to a callback
-  // (used by the add/move/pull flows to choose a location) instead of navigating to it.
-  var scanner = { stream: null, rafId: null, active: false, canvas: document.createElement("canvas"), onResolve: null, lastScanAt: 0 };
-  var qrLibraryPromise = null;
+  // (used by the add/move/pull flows to choose a location, or by "Scan barcode" to fill
+  // in a part's SKU) instead of navigating to it.
+  var SCAN_FORMATS = {
+    location: ["QR_CODE"],
+    barcode: ["UPC_A", "UPC_E", "EAN_13", "EAN_8", "CODE_128", "CODE_39", "ITF"]
+  };
+  var scanner = { stream: null, rafId: null, active: false, canvas: document.createElement("canvas"), readers: {}, mode: null, onResolve: null, lastScanAt: 0 };
+  var scanLibraryPromise = null;
 
-  function loadQrLibrary() {
-    if (typeof jsQR !== "undefined") return Promise.resolve();
-    if (qrLibraryPromise) return qrLibraryPromise;
-    qrLibraryPromise = new Promise(function (resolve, reject) {
+  function loadScanLibrary() {
+    if (typeof ZXing !== "undefined") return Promise.resolve();
+    if (scanLibraryPromise) return scanLibraryPromise;
+    scanLibraryPromise = new Promise(function (resolve, reject) {
       var script = document.createElement("script");
-      script.src = "https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js";
+      script.src = "https://cdn.jsdelivr.net/npm/@zxing/library@0.20.0/umd/index.min.js";
       script.onload = resolve;
-      script.onerror = function () { reject(new Error("QR scanning library failed to load")); };
+      script.onerror = function () { reject(new Error("Scanning library failed to load")); };
       document.head.appendChild(script);
     });
-    return qrLibraryPromise;
+    return scanLibraryPromise;
+  }
+
+  function getScanReader(mode) {
+    if (scanner.readers[mode]) return scanner.readers[mode];
+    var hints = new Map();
+    hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, SCAN_FORMATS[mode].map(function (f) { return ZXing.BarcodeFormat[f]; }));
+    var reader = new ZXing.BrowserMultiFormatReader(hints);
+    scanner.readers[mode] = reader;
+    return reader;
   }
 
   function extractLocationCode(text) {
@@ -1135,16 +1151,21 @@
     return true;
   }
 
+  function resolveScan(text) {
+    var onResolve = scanner.onResolve;
+    closeScanner();
+    if (onResolve) onResolve(text);
+  }
+
   function scanTick() {
     if (!scanner.active) return;
-    if (typeof jsQR === "undefined") {
-      document.getElementById("scan-status").textContent =
-        "Loading the QR scanning library…";
+    if (typeof ZXing === "undefined") {
+      document.getElementById("scan-status").textContent = "Loading the scanning library…";
       scanner.rafId = setTimeout(function () { scanner.rafId = requestAnimationFrame(scanTick); }, 250);
       return;
     }
     var now = Date.now();
-    if (now - scanner.lastScanAt < 120) {
+    if (now - scanner.lastScanAt < 150) {
       scanner.rafId = requestAnimationFrame(scanTick);
       return;
     }
@@ -1152,51 +1173,55 @@
     var video = document.getElementById("scan-video");
     if (video.readyState === video.HAVE_ENOUGH_DATA) {
       var canvas = scanner.canvas;
-      var scale = Math.min(1, 640 / Math.max(video.videoWidth, video.videoHeight));
+      var scale = Math.min(1, 800 / Math.max(video.videoWidth, video.videoHeight));
       canvas.width = Math.max(1, Math.round(video.videoWidth * scale));
       canvas.height = Math.max(1, Math.round(video.videoHeight * scale));
       var ctx = canvas.getContext("2d");
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-      var frame;
       try {
-        frame = ctx.getImageData(0, 0, canvas.width, canvas.height);
-        scanner.frameErrors = 0;
+        var result = getScanReader(scanner.mode).decodeFromCanvas(canvas);
+        if (result && result.getText()) {
+          if (scanner.mode === "location") {
+            if (goToScannedCode(result.getText())) return;
+          } else {
+            resolveScan(result.getText());
+            return;
+          }
+        }
       } catch (e) {
-        frame = null;
-        scanner.frameErrors = (scanner.frameErrors || 0) + 1;
-        if (scanner.frameErrors === 20) {
-          document.getElementById("scan-status").textContent =
-            "Couldn't read the camera image in this browser — enter the location's Section-Aisle-Bay-Shelf below instead.";
-        }
-      }
-      if (frame) {
-        var code = jsQR(frame.data, frame.width, frame.height, { inversionAttempts: "dontInvert" });
-        if (code && code.data) {
-          if (goToScannedCode(code.data)) return;
-        }
+        // ZXing throws NotFoundException on every frame with nothing recognizable in view — expected, ignore.
       }
     }
     scanner.rafId = requestAnimationFrame(scanTick);
   }
 
-  function openScanner(onResolve) {
+  function openScanner(mode, onResolve) {
+    scanner.mode = mode;
     scanner.onResolve = onResolve || null;
-    scanner.frameErrors = 0;
     var modal = document.getElementById("scan-modal");
     var status = document.getElementById("scan-status");
+    var isLocation = mode === "location";
+    document.getElementById("scan-title").textContent = isLocation ? "Scan a location's QR code" : "Scan a barcode";
+    document.getElementById("scan-manual-form").hidden = !isLocation;
+    document.getElementById("barcode-manual-form").hidden = isLocation;
+    var fallbackHint = isLocation ? "enter the location's Section-Aisle-Bay-Shelf" : "type the UPC/part number";
     modal.hidden = false;
     status.textContent = "Loading scanner and requesting camera access…";
-    ["scan-manual-section", "scan-manual-aisle", "scan-manual-bay", "scan-manual-shelf"].forEach(function (id) {
-      var el = document.getElementById(id);
-      if (el) el.value = "";
-    });
+    if (isLocation) {
+      ["scan-manual-section", "scan-manual-aisle", "scan-manual-bay", "scan-manual-shelf"].forEach(function (id) {
+        var el = document.getElementById(id);
+        if (el) el.value = "";
+      });
+    } else {
+      document.getElementById("barcode-manual-input").value = "";
+    }
 
-    loadQrLibrary().catch(function () {
-      status.textContent = "The QR scanning library didn't load — enter the location's Section-Aisle-Bay-Shelf below instead.";
+    loadScanLibrary().catch(function () {
+      status.textContent = "The scanning library didn't load — " + fallbackHint + " below instead.";
     });
 
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      status.textContent = "Camera access isn't available here — type the location code below instead.";
+      status.textContent = "Camera access isn't available here — " + fallbackHint + " below instead.";
       return;
     }
     navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } }).then(function (stream) {
@@ -1205,10 +1230,10 @@
       video.srcObject = stream;
       video.play().catch(function () {});
       scanner.active = true;
-      status.textContent = "Point the camera at a location's QR code.";
+      status.textContent = isLocation ? "Point the camera at a location's QR code." : "Point the camera at the barcode.";
       scanner.rafId = requestAnimationFrame(scanTick);
     }).catch(function (e) {
-      status.textContent = "Couldn't access the camera (" + e.message + ") — type the location code below instead.";
+      status.textContent = "Couldn't access the camera (" + e.message + ") — " + fallbackHint + " below instead.";
     });
   }
 
@@ -1226,9 +1251,10 @@
     if (video) video.srcObject = null;
     document.getElementById("scan-modal").hidden = true;
     scanner.onResolve = null;
+    scanner.mode = null;
   }
 
-  document.getElementById("scan-fab").addEventListener("click", function () { openScanner(); });
+  document.getElementById("scan-fab").addEventListener("click", function () { openScanner("location"); });
   document.getElementById("scan-close").addEventListener("click", closeScanner);
   document.getElementById("scan-modal").addEventListener("click", function (e) {
     if (e.target.id === "scan-modal") closeScanner();
@@ -1247,133 +1273,10 @@
     }
     useLocation(loc);
   });
-
-  // ---------- barcode scanning (UPC on part packaging -> SKU / part number field) ----------
-  var barcodeScanner = { stream: null, rafId: null, active: false, canvas: document.createElement("canvas"), reader: null, onResolve: null, lastScanAt: 0 };
-  var barcodeLibraryPromise = null;
-
-  function loadBarcodeLibrary() {
-    if (typeof ZXing !== "undefined") return Promise.resolve();
-    if (barcodeLibraryPromise) return barcodeLibraryPromise;
-    barcodeLibraryPromise = new Promise(function (resolve, reject) {
-      var script = document.createElement("script");
-      script.src = "https://cdn.jsdelivr.net/npm/@zxing/library@0.20.0/umd/index.min.js";
-      script.onload = resolve;
-      script.onerror = function () { reject(new Error("Barcode scanning library failed to load")); };
-      document.head.appendChild(script);
-    });
-    return barcodeLibraryPromise;
-  }
-
-  function getBarcodeReader() {
-    if (barcodeScanner.reader) return barcodeScanner.reader;
-    var hints = new Map();
-    hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, [
-      ZXing.BarcodeFormat.UPC_A,
-      ZXing.BarcodeFormat.UPC_E,
-      ZXing.BarcodeFormat.EAN_13,
-      ZXing.BarcodeFormat.EAN_8,
-      ZXing.BarcodeFormat.CODE_128,
-      ZXing.BarcodeFormat.CODE_39,
-      ZXing.BarcodeFormat.ITF
-    ]);
-    barcodeScanner.reader = new ZXing.BrowserMultiFormatReader(hints);
-    return barcodeScanner.reader;
-  }
-
-  function resolveBarcodeScan(code) {
-    var onResolve = barcodeScanner.onResolve;
-    closeBarcodeScanner();
-    if (onResolve) onResolve(code);
-  }
-
-  function barcodeTick() {
-    if (!barcodeScanner.active) return;
-    if (typeof ZXing === "undefined") {
-      document.getElementById("barcode-status").textContent = "Loading the barcode scanning library…";
-      barcodeScanner.rafId = setTimeout(function () { barcodeScanner.rafId = requestAnimationFrame(barcodeTick); }, 250);
-      return;
-    }
-    var now = Date.now();
-    if (now - barcodeScanner.lastScanAt < 150) {
-      barcodeScanner.rafId = requestAnimationFrame(barcodeTick);
-      return;
-    }
-    barcodeScanner.lastScanAt = now;
-    var video = document.getElementById("barcode-video");
-    if (video.readyState === video.HAVE_ENOUGH_DATA) {
-      var canvas = barcodeScanner.canvas;
-      var scale = Math.min(1, 800 / Math.max(video.videoWidth, video.videoHeight));
-      canvas.width = Math.max(1, Math.round(video.videoWidth * scale));
-      canvas.height = Math.max(1, Math.round(video.videoHeight * scale));
-      var ctx = canvas.getContext("2d");
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-      try {
-        var result = getBarcodeReader().decodeFromCanvas(canvas);
-        if (result && result.getText()) {
-          resolveBarcodeScan(result.getText());
-          return;
-        }
-      } catch (e) {
-        // ZXing throws NotFoundException on every frame with no barcode in view — expected, ignore.
-      }
-    }
-    barcodeScanner.rafId = requestAnimationFrame(barcodeTick);
-  }
-
-  function openBarcodeScanner(onResolve) {
-    barcodeScanner.onResolve = onResolve || null;
-    var modal = document.getElementById("barcode-modal");
-    var status = document.getElementById("barcode-status");
-    modal.hidden = false;
-    document.getElementById("barcode-manual-input").value = "";
-    status.textContent = "Loading scanner and requesting camera access…";
-
-    loadBarcodeLibrary().catch(function () {
-      status.textContent = "The barcode scanning library didn't load — type the UPC/part number below instead.";
-    });
-
-    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      status.textContent = "Camera access isn't available here — type the UPC/part number below instead.";
-      return;
-    }
-    navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } }).then(function (stream) {
-      barcodeScanner.stream = stream;
-      var video = document.getElementById("barcode-video");
-      video.srcObject = stream;
-      video.play().catch(function () {});
-      barcodeScanner.active = true;
-      status.textContent = "Point the camera at the barcode.";
-      barcodeScanner.rafId = requestAnimationFrame(barcodeTick);
-    }).catch(function (e) {
-      status.textContent = "Couldn't access the camera (" + e.message + ") — type the UPC/part number below instead.";
-    });
-  }
-
-  function closeBarcodeScanner() {
-    barcodeScanner.active = false;
-    if (barcodeScanner.rafId) cancelAnimationFrame(barcodeScanner.rafId);
-    if (barcodeScanner.rafId) clearTimeout(barcodeScanner.rafId);
-    barcodeScanner.rafId = null;
-    barcodeScanner.lastScanAt = 0;
-    if (barcodeScanner.stream) {
-      barcodeScanner.stream.getTracks().forEach(function (t) { t.stop(); });
-      barcodeScanner.stream = null;
-    }
-    var video = document.getElementById("barcode-video");
-    if (video) video.srcObject = null;
-    document.getElementById("barcode-modal").hidden = true;
-    barcodeScanner.onResolve = null;
-  }
-
-  document.getElementById("barcode-close").addEventListener("click", closeBarcodeScanner);
-  document.getElementById("barcode-modal").addEventListener("click", function (e) {
-    if (e.target.id === "barcode-modal") closeBarcodeScanner();
-  });
   document.getElementById("barcode-manual-form").addEventListener("submit", function (e) {
     e.preventDefault();
     var val = document.getElementById("barcode-manual-input").value.trim();
-    if (val) resolveBarcodeScan(val);
+    if (val) resolveScan(val);
   });
 
   // ---------- add / move / pull flows ----------
@@ -1518,7 +1421,7 @@
 
     var scanBtn = document.getElementById("flow-scan");
     if (scanBtn) scanBtn.addEventListener("click", function () {
-      openScanner(function (loc) {
+      openScanner("location", function (loc) {
         flow.section = loc.section || "";
         flow.aisle = loc.aisle || "";
         flow.bay = loc.bay || "";
@@ -1715,7 +1618,7 @@
     var scanSkuBtn = e.target.closest("[data-scan-sku]");
     if (scanSkuBtn) {
       var skuField = scanSkuBtn.closest("form").querySelector('[name="sku"]');
-      openBarcodeScanner(function (code) {
+      openScanner("barcode", function (code) {
         if (skuField) {
           skuField.value = code;
           skuField.focus();
