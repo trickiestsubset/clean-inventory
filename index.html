@@ -1091,7 +1091,7 @@
     location: ["QR_CODE"],
     barcode: ["UPC_A", "UPC_E", "EAN_13", "EAN_8", "CODE_128", "CODE_39", "ITF"]
   };
-  var scanner = { stream: null, rafId: null, active: false, canvas: document.createElement("canvas"), readers: {}, mode: null, onResolve: null, lastScanAt: 0 };
+  var scanner = { stream: null, rafId: null, active: false, readers: {}, mode: null, onResolve: null, lastScanAt: 0 };
   var scanLibraryPromise = null;
 
   function loadScanLibrary() {
@@ -1172,14 +1172,10 @@
     scanner.lastScanAt = now;
     var video = document.getElementById("scan-video");
     if (video.readyState === video.HAVE_ENOUGH_DATA) {
-      var canvas = scanner.canvas;
-      var scale = Math.min(1, 800 / Math.max(video.videoWidth, video.videoHeight));
-      canvas.width = Math.max(1, Math.round(video.videoWidth * scale));
-      canvas.height = Math.max(1, Math.round(video.videoHeight * scale));
-      var ctx = canvas.getContext("2d");
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
       try {
-        var result = getScanReader(scanner.mode).decodeFromCanvas(canvas);
+        // decode() sizes its internal capture canvas from videoWidth/videoHeight, so it needs
+        // the <video> element itself — passing it a plain <canvas> leaves that canvas 0x0.
+        var result = getScanReader(scanner.mode).decode(video);
         if (result && result.getText()) {
           if (scanner.mode === "location") {
             if (goToScannedCode(result.getText())) return;
