@@ -259,6 +259,7 @@
   }
   .scan-bar:hover { filter: brightness(1.1); }
   .scan-bar svg { width: 1.3em; height: 1.3em; flex-shrink: 0; }
+  .scan-bar-label { font-size: 1.3em; }
 
   .scan-modal-backdrop {
     position: fixed; inset: 0; z-index: 60; background: rgba(10, 12, 8, 0.6);
@@ -334,7 +335,7 @@
       <path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/>
       <rect x="7" y="7" width="10" height="10" rx="1"/>
     </svg>
-    Scan location
+    <span class="scan-bar-label">Scan</span>
   </button>
 
   <div class="scan-modal-backdrop" id="cycle-modal" hidden>
@@ -494,6 +495,11 @@
   }
   function getPart(id) {
     return state.parts.find(function (p) { return p.id === id; });
+  }
+  function getPartBySku(sku) {
+    var s = (sku || "").trim().toLowerCase();
+    if (!s) return null;
+    return state.parts.find(function (p) { return (p.sku || "").trim().toLowerCase() === s; });
   }
   function invRow(locationId, partId) {
     return state.inventory.find(function (i) { return i.locationId === locationId && i.partId === partId; });
@@ -1083,13 +1089,18 @@
 
   // ---------- scanning (QR codes for locations, barcodes for part UPCs) ----------
   // One camera/canvas/decode-loop harness backed by ZXing, which reads both symbologies.
-  // scanner.mode picks which formats to decode and which manual-entry fallback to show;
-  // scanner.onResolve, when set, redirects a successful scan/manual-entry to a callback
-  // (used by the add/move/pull flows to choose a location, or by "Scan barcode" to fill
-  // in a part's SKU) instead of navigating to it.
+  // scanner.mode picks which formats to decode and which manual-entry fallback to show:
+  //   - "location": QR codes only, resolves to a location (used by the add/move/pull flows).
+  //   - "barcode": UPC/EAN/etc only, hands the raw text back via onResolve (used by "Scan
+  //     barcode" on the New part form to fill in a SKU).
+  //   - "any": both, used by the header's general "Scan" button — a location QR opens that
+  //     location, a barcode matching a part's SKU opens that part's page.
+  // scanner.onResolve, when set, redirects a successful location scan to a callback instead
+  // of navigating to it directly.
   var SCAN_FORMATS = {
     location: ["QR_CODE"],
-    barcode: ["UPC_A", "UPC_E", "EAN_13", "EAN_8", "CODE_128", "CODE_39", "ITF"]
+    barcode: ["UPC_A", "UPC_E", "EAN_13", "EAN_8", "CODE_128", "CODE_39", "ITF"],
+    any: ["QR_CODE", "UPC_A", "UPC_E", "EAN_13", "EAN_8", "CODE_128", "CODE_39", "ITF"]
   };
   var scanner = { stream: null, rafId: null, active: false, readers: {}, mode: null, onResolve: null, lastScanAt: 0 };
   var scanLibraryPromise = null;
@@ -1151,6 +1162,26 @@
     return true;
   }
 
+  function goToScannedCodeOrPart(raw) {
+    var locCode = extractLocationCode(raw);
+    if (locCode) {
+      var loc = getLocationByCode(locCode);
+      if (loc) {
+        useLocation(loc);
+        return true;
+      }
+    }
+    var part = getPartBySku(raw);
+    if (part) {
+      closeScanner();
+      window.location.hash = "#/parts/" + part.id;
+      toast("Opened " + part.name + ".");
+      return true;
+    }
+    document.getElementById("scan-status").textContent = "No location or part matches that code.";
+    return false;
+  }
+
   function resolveScan(text) {
     var onResolve = scanner.onResolve;
     closeScanner();
@@ -1179,6 +1210,8 @@
         if (result && result.getText()) {
           if (scanner.mode === "location") {
             if (goToScannedCode(result.getText())) return;
+          } else if (scanner.mode === "any") {
+            if (goToScannedCodeOrPart(result.getText())) return;
           } else {
             resolveScan(result.getText());
             return;
@@ -1197,10 +1230,16 @@
     var modal = document.getElementById("scan-modal");
     var status = document.getElementById("scan-status");
     var isLocation = mode === "location";
-    document.getElementById("scan-title").textContent = isLocation ? "Scan a location's QR code" : "Scan a barcode";
+    var isAny = mode === "any";
+    var title = isLocation ? "Scan a location's QR code" : (isAny ? "Scan" : "Scan a barcode");
+    var fallbackHint = isLocation ? "enter the location's Section-Aisle-Bay-Shelf" :
+      (isAny ? "enter the location code or UPC/part number" : "type the UPC/part number");
+    var activeStatus = isLocation ? "Point the camera at a location's QR code." :
+      (isAny ? "Point the camera at a location's QR code or a part's barcode." : "Point the camera at the barcode.");
+    document.getElementById("scan-title").textContent = title;
     document.getElementById("scan-manual-form").hidden = !isLocation;
     document.getElementById("barcode-manual-form").hidden = isLocation;
-    var fallbackHint = isLocation ? "enter the location's Section-Aisle-Bay-Shelf" : "type the UPC/part number";
+    document.getElementById("barcode-manual-input").placeholder = isAny ? "Enter location code or UPC / part number" : "Enter UPC / part number";
     modal.hidden = false;
     status.textContent = "Loading scanner and requesting camera access…";
     if (isLocation) {
@@ -1226,7 +1265,7 @@
       video.srcObject = stream;
       video.play().catch(function () {});
       scanner.active = true;
-      status.textContent = isLocation ? "Point the camera at a location's QR code." : "Point the camera at the barcode.";
+      status.textContent = activeStatus;
       scanner.rafId = requestAnimationFrame(scanTick);
     }).catch(function (e) {
       status.textContent = "Couldn't access the camera (" + e.message + ") — " + fallbackHint + " below instead.";
@@ -1250,7 +1289,7 @@
     scanner.mode = null;
   }
 
-  document.getElementById("scan-fab").addEventListener("click", function () { openScanner("location"); });
+  document.getElementById("scan-fab").addEventListener("click", function () { openScanner("any"); });
   document.getElementById("scan-close").addEventListener("click", closeScanner);
   document.getElementById("scan-modal").addEventListener("click", function (e) {
     if (e.target.id === "scan-modal") closeScanner();
@@ -1272,7 +1311,9 @@
   document.getElementById("barcode-manual-form").addEventListener("submit", function (e) {
     e.preventDefault();
     var val = document.getElementById("barcode-manual-input").value.trim();
-    if (val) resolveScan(val);
+    if (!val) return;
+    if (scanner.mode === "any") goToScannedCodeOrPart(val);
+    else resolveScan(val);
   });
 
   // ---------- add / move / pull flows ----------
