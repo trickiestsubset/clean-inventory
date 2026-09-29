@@ -565,6 +565,10 @@
   }
 
   function createLocation(section, aisle, bay, shelf, notes) {
+    if (getLocationByParts(section, aisle, bay, shelf)) {
+      toast("That location already exists.", true);
+      return Promise.resolve();
+    }
     var name = locationLabel(section, aisle, bay, shelf);
     return db.collection("locations").add({
       code: genCode(6), name: name,
@@ -606,7 +610,21 @@
     });
   }
 
+  function getPartByName(name) {
+    var n = (name || "").trim().toLowerCase();
+    if (!n) return null;
+    return state.parts.find(function (p) { return (p.name || "").trim().toLowerCase() === n; });
+  }
+
   function createPart(name, sku, description, photoDataUrl) {
+    if (getPartByName(name)) {
+      toast("A part named \"" + name.trim() + "\" already exists.", true);
+      return Promise.resolve();
+    }
+    if (sku && getPartBySku(sku)) {
+      toast("A part with SKU \"" + sku.trim() + "\" already exists.", true);
+      return Promise.resolve();
+    }
     return db.collection("parts").add({
       name: name, sku: sku || null, description: description || null,
       photoDataUrl: photoDataUrl || null, createdAt: Date.now(), recentActivity: []
@@ -937,11 +955,11 @@
             (r.part.sku ? '<div class="ledger-sku">SKU ' + esc(r.part.sku) + '</div>' : '') +
             '<div class="ledger-actions">' +
               '<form data-form="pull" data-location="' + loc.id + '" data-part="' + r.part.id + '">' +
-                '<input class="qty-input" type="number" name="qty" min="1" value="1" required /> ' +
+                '<input class="qty-input" type="number" name="qty" min="1" autocomplete="off" required /> ' +
                 '<button class="btn btn-accent btn-sm" type="submit">Pull</button>' +
               '</form>' +
               '<form data-form="add" data-location="' + loc.id + '" data-part="' + r.part.id + '">' +
-                '<input class="qty-input" type="number" name="qty" min="1" value="1" required /> ' +
+                '<input class="qty-input" type="number" name="qty" min="1" autocomplete="off" required /> ' +
                 '<button class="btn btn-accent btn-sm" type="submit">Add</button>' +
               '</form>' +
             '</div>' +
@@ -961,7 +979,7 @@
           available.map(function (p) { return '<option value="' + p.id + '">' + esc(p.name) + (p.sku ? ' (' + esc(p.sku) + ')' : '') + '</option>'; }).join("") +
         '</select>' +
         '<div class="form-row">' +
-          '<input type="number" name="qty" min="1" value="1" required style="max-width:6em;" />' +
+          '<input type="number" name="qty" min="1" autocomplete="off" required style="max-width:6em;" />' +
           '<button class="btn btn-accent" type="submit">Add to this location</button>' +
         '</div>' +
       '</form>';
