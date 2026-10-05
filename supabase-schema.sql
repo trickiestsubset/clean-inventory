@@ -42,9 +42,23 @@ create table if not exists inventory (
   updated_at bigint
 );
 
+create table if not exists orders (
+  id uuid primary key default gen_random_uuid(),
+  order_number text unique not null,
+  customer_name text not null,
+  address text,
+  -- open | picked | packed | staging | closed | cancelled
+  status text not null default 'open',
+  -- [{ "partId": "<parts.id>", "quantity": 3 }, ...]
+  lines jsonb not null default '[]'::jsonb,
+  created_at bigint,
+  updated_at bigint
+);
+
 alter table locations enable row level security;
 alter table parts enable row level security;
 alter table inventory enable row level security;
+alter table orders enable row level security;
 
 -- The app's only access control is a client-side passcode gate (not real auth), so these
 -- policies allow the anon/public key full read+write. Anyone with the project URL + anon key
@@ -78,8 +92,26 @@ create policy "public update inventory" on inventory for update using (true) wit
 drop policy if exists "public delete inventory" on inventory;
 create policy "public delete inventory" on inventory for delete using (true);
 
--- Enable realtime (live sync between devices). If a table is already a member you'll see
--- a harmless "already member of publication" error — safe to ignore.
-alter publication supabase_realtime add table locations;
-alter publication supabase_realtime add table parts;
-alter publication supabase_realtime add table inventory;
+drop policy if exists "public select orders" on orders;
+create policy "public select orders" on orders for select using (true);
+drop policy if exists "public insert orders" on orders;
+create policy "public insert orders" on orders for insert with check (true);
+drop policy if exists "public update orders" on orders;
+create policy "public update orders" on orders for update using (true) with check (true);
+drop policy if exists "public delete orders" on orders;
+create policy "public delete orders" on orders for delete using (true);
+
+-- Enable realtime (live sync between devices). Skips tables that are already members, so this
+-- script is safe to re-run.
+do $$
+declare t text;
+begin
+  foreach t in array array['locations', 'parts', 'inventory', 'orders'] loop
+    if not exists (
+      select 1 from pg_publication_tables
+      where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = t
+    ) then
+      execute format('alter publication supabase_realtime add table public.%I', t);
+    end if;
+  end loop;
+end $$;
