@@ -239,6 +239,7 @@
   }
   .status-open { color: var(--accent); }
   .status-picked, .status-packed, .status-staging { color: var(--ink); }
+  .status-backordered { color: var(--muted); border-style: dashed; }
   .status-closed { color: var(--good); }
   .status-cancelled { color: var(--danger); }
   .order-meta { margin: 6px 0 18px; }
@@ -256,6 +257,13 @@
   .order-list-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 12px 4px; border-bottom: 1px solid var(--line); text-decoration: none; }
   .order-list-row:first-child { border-top: 1px solid var(--line); }
   .order-list-row:hover .ledger-name { text-decoration: underline; }
+  .staging-loc { display: flex; align-items: center; gap: 6px; font-family: var(--font-mono); font-weight: 700; font-size: 1.3em; }
+  .staging-loc input { width: 3.2em; text-align: center; text-transform: uppercase; font-family: var(--font-mono); font-weight: 700; font-size: 1em; }
+  .pack-row { display: flex; align-items: center; gap: 12px; padding: 10px; border: 1px solid var(--line); border-radius: var(--radius-sm); margin-bottom: 8px; }
+  .pack-row .pack-name { flex: 1; min-width: 0; font-weight: 600; }
+  .pack-row .pack-qty { width: 5em; text-align: center; font-family: var(--font-mono); font-weight: 700; }
+  .pack-row.bad { border-color: var(--danger); background: var(--danger-wash); }
+  .pack-row.bad .pack-qty { border: 2px solid var(--danger); background: var(--surface); }
 
   .toast-wrap { position: fixed; bottom: 76px; left: 50%; transform: translateX(-50%); z-index: 50; display: flex; flex-direction: column; gap: 8px; align-items: center; }
   .toast {
@@ -375,6 +383,36 @@
     </div>
   </div>
 
+  <div class="scan-modal-backdrop" id="pack-modal" hidden>
+    <div class="scan-modal" style="max-height:90vh; overflow-y:auto;">
+      <div class="scan-modal-head">
+        <h2 style="font-size:1em;" id="pack-title">Packing</h2>
+        <button class="btn btn-accent btn-sm" id="pack-close" type="button">Close</button>
+      </div>
+      <div id="pack-body"></div>
+    </div>
+  </div>
+
+  <div class="scan-modal-backdrop" id="staging-modal" hidden>
+    <div class="scan-modal">
+      <div class="scan-modal-head">
+        <h2 style="font-size:1em;" id="staging-title">Staging</h2>
+        <button class="btn btn-accent btn-sm" id="staging-close" type="button">Close</button>
+      </div>
+      <div id="staging-body"></div>
+    </div>
+  </div>
+
+  <div class="scan-modal-backdrop" id="close-modal" hidden>
+    <div class="scan-modal" style="max-height:90vh; overflow-y:auto;">
+      <div class="scan-modal-head">
+        <h2 style="font-size:1em;" id="close-title">Close orders</h2>
+        <button class="btn btn-accent btn-sm" id="close-close" type="button">Cancel</button>
+      </div>
+      <div id="close-body"></div>
+    </div>
+  </div>
+
   <div class="scan-modal-backdrop" id="flow-modal" hidden>
     <div class="scan-modal">
       <div class="scan-modal-head">
@@ -447,7 +485,7 @@
     locations: { code: "code", name: "name", section: "section", aisle: "aisle", bay: "bay", shelf: "shelf", notes: "notes", createdAt: "created_at", recentActivity: "recent_activity" },
     parts: { name: "name", sku: "sku", description: "description", photoDataUrl: "photo_data_url", createdAt: "created_at", recentActivity: "recent_activity" },
     inventory: { locationId: "location_id", partId: "part_id", quantity: "quantity", updatedAt: "updated_at" },
-    orders: { orderNumber: "order_number", customerName: "customer_name", address: "address", status: "status", lines: "lines", createdAt: "created_at", updatedAt: "updated_at" }
+    orders: { orderNumber: "order_number", customerName: "customer_name", address: "address", status: "status", lines: "lines", parentOrder: "parent_order", stagingLocation: "staging_location", packages: "packages", createdAt: "created_at", updatedAt: "updated_at" }
   };
 
   // ---------- passcode gate ----------
@@ -564,6 +602,8 @@
       }
       return ref.set({ locationId: locationId, partId: partId, quantity: next, updatedAt: Date.now() }).then(function () {
         logActivity(locationId, partId, delta, reason);
+        noteInventory(locationId, partId, next);
+        if (delta > 0) fillBackorders();
         return true;
       });
     }).catch(function (e) {
@@ -718,6 +758,7 @@
   // sits is looked up from live inventory, never stored, so it can't go stale.
   var ORDER_STATUSES = [
     { key: "open", label: "Open" },
+    { key: "backordered", label: "Backordered" },
     { key: "picked", label: "Picked" },
     { key: "packed", label: "Packed" },
     { key: "staging", label: "Staging" },
@@ -755,6 +796,30 @@
     return ORDER_PREFIX + (max + 1);
   }
 
+  // ---------- stock availability & backorders ----------
+  // Stock already promised to Open orders is reserved, less whatever has already been pulled for
+  // them (a line's "picked" count). Picked and later statuses no longer count against the shelf,
+  // and a Backordered order is just waiting, so it holds nothing.
+  function reservedForPart(partId) {
+    return state.orders.reduce(function (sum, o) {
+      if (o.status !== "open") return sum;
+      return sum + (o.lines || []).reduce(function (s2, ln) { return ln.partId === partId ? s2 + Math.max(0, ln.quantity - (ln.picked || 0)) : s2; }, 0);
+    }, 0);
+  }
+  function availableForPart(partId) {
+    return Math.max(0, totalForPart(partId) - reservedForPart(partId));
+  }
+
+  // A backorder is its own order, named <original>.<n>, counting up per original order.
+  function nextBackorderNumber(rootNumber) {
+    var max = 0, prefix = rootNumber + ".";
+    state.orders.forEach(function (o) {
+      var n = o.orderNumber || "";
+      if (n.indexOf(prefix) === 0 && /^\d+$/.test(n.slice(prefix.length))) max = Math.max(max, Number(n.slice(prefix.length)));
+    });
+    return prefix + (max + 1);
+  }
+
   function createOrder(number, customerName, address, lines) {
     if (!number) { toast("An order needs an order number.", true); return Promise.resolve(null); }
     if (!customerName) { toast("An order needs a customer name.", true); return Promise.resolve(null); }
@@ -774,6 +839,127 @@
       toast("Couldn't create that order: " + e.message, true);
       return null;
     });
+  }
+
+  // Put `qty` of a part on a new <original>.<n> order that waits as Backordered until stock arrives.
+  function createBackorderOrder(order, partId, qty) {
+    var root = order.parentOrder || order.orderNumber;
+    var now = Date.now();
+    var child = {
+      orderNumber: nextBackorderNumber(root), customerName: order.customerName, address: order.address || null,
+      status: "backordered", lines: [{ partId: partId, quantity: qty }], parentOrder: root, createdAt: now, updatedAt: now
+    };
+    return db.collection("orders").add(child).then(function (ref) {
+      state.orders.push(Object.assign({ id: ref && ref.id }, child));
+      return child;
+    });
+  }
+
+  // Applies the change locally right away and redraws; if the save fails, puts the order back the
+  // way it was (so the screen never disagrees with what's actually stored) and re-throws.
+  function saveOrderFields(order, fields) {
+    var now = Date.now();
+    var before = { updatedAt: order.updatedAt };
+    Object.keys(fields).forEach(function (k) { before[k] = order[k]; });
+    Object.assign(order, fields, { updatedAt: now });
+    scheduleRender();
+    return db.doc("orders/" + order.id).update(Object.assign({}, fields, { updatedAt: now })).catch(function (e) {
+      Object.assign(order, before);
+      scheduleRender();
+      throw e;
+    });
+  }
+
+  function allLinesPicked(lines) {
+    return lines.length > 0 && lines.every(function (l) { return (l.picked || 0) >= l.quantity; });
+  }
+
+  // Take `qty` of a line's still-to-pick quantity off the order and backorder it. The rest of the
+  // order carries on as normal; if nothing is left on it, there's nothing for it to do, so it closes.
+  function backorderOrderLine(order, partId, qty) {
+    var lines = (order.lines || []).map(function (l) { return Object.assign({}, l); });
+    var line = lines.find(function (l) { return l.partId === partId; });
+    if (!line || qty <= 0) return Promise.resolve();
+    line.quantity -= qty;
+    if (line.quantity <= 0) lines = lines.filter(function (l) { return l !== line; });
+    var fields = { lines: lines };
+    if (!lines.length) fields.status = "closed";
+    else if (order.status === "open" && allLinesPicked(lines)) fields.status = "picked";
+    return createBackorderOrder(order, partId, qty).then(function () {
+      return saveOrderFields(order, fields);
+    }).catch(function (e) {
+      toast("Couldn't backorder that: " + e.message, true);
+    });
+  }
+
+  // After parts are pulled for an order line: count them as picked, and optionally backorder
+  // whatever of that line is still outstanding.
+  function recordOrderPick(orderId, partId, qty, backorderRest) {
+    var order = state.orders.find(function (o) { return o.id === orderId; });
+    if (!order) return Promise.resolve();
+    var lines = (order.lines || []).map(function (l) { return Object.assign({}, l); });
+    var line = lines.find(function (l) { return l.partId === partId; });
+    if (!line) return Promise.resolve();
+    line.picked = (line.picked || 0) + qty;
+    var rest = line.quantity - line.picked;
+    var pickFields = { lines: lines };
+    if (order.status === "open" && allLinesPicked(lines)) pickFields.status = "picked";
+    return saveOrderFields(order, pickFields).then(function () {
+      if (backorderRest && rest > 0) return backorderOrderLine(order, partId, rest);
+    }).catch(function (e) {
+      toast("Couldn't save that pick: " + e.message, true);
+    });
+  }
+
+  // Run after stock goes up. Backordered orders (oldest first) become Open, and so pickable, once
+  // their part is in stock. If only some of it is, that much becomes Open and the rest stays
+  // behind as a new <original>.<n> backorder.
+  var backorderBusy = false, backorderAgain = false;
+  function fillBackorders() {
+    if (backorderBusy) { backorderAgain = true; return Promise.resolve(); }
+    backorderBusy = true;
+    var waiting = state.orders
+      .filter(function (o) { return o.status === "backordered"; })
+      .sort(function (a, b) { return (a.createdAt || 0) - (b.createdAt || 0); });
+
+    return waiting.reduce(function (chain, order) {
+      return chain.then(function () {
+        var fill = [], remaining = [];
+        (order.lines || []).forEach(function (ln) {
+          var take = Math.min(ln.quantity, availableForPart(ln.partId));
+          if (take > 0) fill.push({ partId: ln.partId, quantity: take });
+          if (ln.quantity > take) remaining.push({ partId: ln.partId, quantity: ln.quantity - take });
+        });
+        if (!fill.length) return;
+        // Open it locally right away so the next order in this pass sees the reservation.
+        var before = { lines: order.lines, status: order.status };
+        var split = Promise.resolve();
+        if (remaining.length) {
+          split = remaining.reduce(function (c, ln) {
+            return c.then(function () { return createBackorderOrder(order, ln.partId, ln.quantity); });
+          }, Promise.resolve());
+        }
+        return split.then(function () {
+          return saveOrderFields(order, { lines: fill, status: "open" });
+        }).then(function () {
+          toast(order.orderNumber + " is ready to pick.");
+        }).catch(function (e) {
+          Object.assign(order, before);
+          toast("Couldn't update backorder " + order.orderNumber + ": " + e.message, true);
+        });
+      });
+    }, Promise.resolve()).then(function () {
+      backorderBusy = false;
+      if (backorderAgain) { backorderAgain = false; return fillBackorders(); }
+    }, function () { backorderBusy = false; });
+  }
+
+  // The local inventory cache only catches up when the realtime event arrives; patch it as soon
+  // as we write so a backorder check right after a write sees the new quantity.
+  function noteInventory(locationId, partId, qty) {
+    var row = invRow(locationId, partId);
+    if (row) row.quantity = qty;
+    else state.inventory.push({ id: locationId + "__" + partId, locationId: locationId, partId: partId, quantity: qty, updatedAt: Date.now() });
   }
 
   // ---------- routing ----------
@@ -802,7 +988,9 @@
     }
 
     var view = document.getElementById("view");
-    if (route[0] === "o" && route[1] && route[2] === "print") view.innerHTML = renderOrderPrint(route[1]);
+    if (route[0] === "s" && route[1] && route[2] === "print") view.innerHTML = renderStagingPrint(route[1]);
+    else if (route[0] === "s" && route[1]) view.innerHTML = renderStagingLocation(route[1]);
+    else if (route[0] === "o" && route[1] && route[2] === "print") view.innerHTML = renderOrderPrint(route[1]);
     else if (route[0] === "o" && route[1]) view.innerHTML = renderOrder(route[1]);
     else if (route[0] === "orders") view.innerHTML = renderOrders();
     else if (route[0] === "l" && route[1] && route[2] === "print") view.innerHTML = renderLocationPrint(route[1]);
@@ -872,6 +1060,20 @@
         renderOrderSearchForm() +
       '</div>' +
       '<div class="panel" style="margin-bottom:22px;">' +
+        '<div class="section-title" style="margin-top:0;">Packing</div>' +
+        '<form class="form-row" data-form="packOrder">' +
+          '<input type="text" name="q" placeholder="Order number to pack" autocomplete="off" />' +
+          '<button class="btn btn-accent" type="submit" style="flex:0 0 auto;">Start packing</button>' +
+        '</form>' +
+      '</div>' +
+      '<div class="panel" style="margin-bottom:22px;">' +
+        '<div class="section-title" style="margin-top:0;">Staging</div>' +
+        '<form class="form-row" data-form="stagingSearch" style="align-items:center;">' +
+          '<div class="staging-loc" style="flex:0 0 auto; min-width:0;">ST-<input type="text" name="code" maxlength="2" placeholder="XX" autocomplete="off" autocapitalize="characters" /></div>' +
+          '<button class="btn btn-accent" type="submit" style="flex:0 0 auto;">Find</button>' +
+        '</form>' +
+      '</div>' +
+      '<div class="panel" style="margin-bottom:22px;">' +
         '<div class="section-title" style="margin-top:0;">Find location</div>' +
         '<form class="form-grid" data-form="locationSearch">' +
           '<div class="loc-parts-row">' +
@@ -889,6 +1091,77 @@
       renderCycleCountBox();
   }
 
+  // ---------- view: staging location ----------
+  function normalizeStagingCode(raw) {
+    var m = /^(?:ST-?)?([A-Z0-9]{2})$/.exec(String(raw || "").trim().toUpperCase());
+    return m ? "ST-" + m[1] : null;
+  }
+  function stagingHref(code) { return "#/s/" + encodeURIComponent(code); }
+
+  function ordersStagedAt(code) {
+    return state.orders
+      .filter(function (o) { return o.status === "staging" && String(o.stagingLocation || "").toUpperCase() === code; })
+      .sort(function (a, b) { return (a.updatedAt || 0) - (b.updatedAt || 0); });
+  }
+  function packageTotalsFor(orders) {
+    var totals = { box: 0, bag: 0, other: 0 };
+    orders.forEach(function (o) {
+      PACKAGE_TYPES.forEach(function (t) { totals[t.key] += Number(o.packages && o.packages[t.key]) || 0; });
+    });
+    return totals;
+  }
+
+  function renderStagingLocation(rawCode) {
+    var code = normalizeStagingCode(rawCode);
+    if (!code) return '<p class="empty-state">That isn\u2019t a staging location. They look like ST-04.</p>';
+    var here = ordersStagedAt(code);
+
+    // Totals across everything staged here, by package type.
+    var totals = packageTotalsFor(here);
+    var totalPackages = PACKAGE_TYPES.reduce(function (n, t) { return n + totals[t.key]; }, 0);
+    var breakdown = packagesLabel({ packages: totals });
+
+    var html = '<div class="crumb"><a href="#/">Home</a> / Staging</div>' +
+      '<div class="view-head" style="margin-bottom:4px;"><h1>' + esc(code) + '</h1></div>';
+
+    if (!here.length) {
+      html += '<p class="empty-state">Nothing is staged here.</p>';
+    } else {
+      html += '<div style="font-size:1.6em; font-weight:700; font-family:var(--font-mono);">' + totalPackages + ' package' + (totalPackages === 1 ? '' : 's') + '</div>' +
+        (breakdown ? '<div class="hint" style="font-size:1em; margin-bottom:8px;">' + esc(breakdown) + '</div>' : '');
+      html += '<div class="section-title">Orders</div>';
+      html += here.map(function (o) {
+        return '<a class="order-list-row" href="' + orderHref(o) + '">' +
+          '<div style="min-width:0;"><span class="ledger-name">' + esc(o.orderNumber) + '</span>' +
+            '<div class="hint">' + esc(o.customerName || "") + (packagesLabel(o) ? ' \u00b7 ' + esc(packagesLabel(o)) : '') + '</div></div>' +
+          statusBadge(o.status) +
+        '</a>';
+      }).join("");
+    }
+
+    html += '<div class="panel no-print" style="margin-top:24px; display:flex; align-items:center; justify-content:space-between; gap:14px; flex-wrap:wrap;">' +
+      '<div class="barcode-box"><svg data-barcode="' + esc(code) + '"></svg></div>' +
+      '<a class="btn btn-accent" href="' + stagingHref(code) + '/print">Print barcode</a>' +
+    '</div>';
+    if (here.length) {
+      html += '<div class="no-print" style="display:flex; justify-content:flex-end; margin-top:14px;">' +
+        '<button class="btn btn-accent" type="button" data-close-orders="' + esc(code) + '">Close Orders</button>' +
+      '</div>';
+    }
+    return html;
+  }
+
+  function renderStagingPrint(rawCode) {
+    var code = normalizeStagingCode(rawCode);
+    if (!code) return '<p class="empty-state">That isn\u2019t a staging location. They look like ST-04.</p>';
+    return '<div class="view-head no-print"><h1>Print staging barcode</h1>' +
+      '<button class="btn btn-accent" onclick="window.print()">Print</button></div>' +
+      '<div class="print-grid"><div class="print-tile">' +
+        '<div class="barcode-box"><svg data-barcode="' + esc(code) + '"></svg></div>' +
+        '<div class="loc-name" style="margin-top:8px;">' + esc(code) + '</div>' +
+      '</div></div>';
+  }
+
   // ---------- view: orders ----------
   function renderOrderSearchForm() {
     return '<form class="form-row" data-form="orderSearch">' +
@@ -901,7 +1174,13 @@
 
   function renderOrders() {
     var d = orderDraft;
-    var sorted = state.orders.slice().sort(function (a, b) { return (b.createdAt || 0) - (a.createdAt || 0); });
+    // Closed and Cancelled orders never show here. Backordered ones only show when picked in the filter.
+    var FILTERS = ["open", "picked", "packed", "staging", "backordered"];
+    var filter = new URLSearchParams(window.location.hash.split("?")[1] || "").get("status");
+    if (FILTERS.indexOf(filter) === -1) filter = "";
+    var sorted = state.orders
+      .filter(function (o) { return filter ? o.status === filter : (FILTERS.indexOf(o.status) !== -1 && o.status !== "backordered"); })
+      .sort(function (a, b) { return (b.createdAt || 0) - (a.createdAt || 0); });
     var parts = state.parts.slice().sort(function (a, b) { return a.name.localeCompare(b.name); });
 
     var html = '<div class="view-head"><h1>Orders</h1></div>' +
@@ -944,9 +1223,15 @@
     html += '<button class="btn btn-accent" type="submit" style="justify-self:start;">Create order</button>' +
       '</form></div>';
 
-    html += '<div class="section-title">All orders (' + sorted.length + ')</div>';
+    html += '<div class="view-head" style="margin:28px 0 10px; align-items:center;">' +
+      '<div class="section-title" style="margin:0;">Orders (' + sorted.length + ')</div>' +
+      '<select data-order-filter aria-label="Filter orders by status">' +
+        '<option value="">All active</option>' +
+        FILTERS.map(function (k) { return '<option value="' + k + '"' + (k === filter ? ' selected' : '') + '>' + esc(orderStatusLabel(k)) + '</option>'; }).join("") +
+      '</select>' +
+    '</div>';
     if (!sorted.length) {
-      html += '<p class="empty-state">No orders yet.</p>';
+      html += '<p class="empty-state">' + (filter ? 'No ' + esc(orderStatusLabel(filter).toLowerCase()) + ' orders.' : 'No orders yet.') + '</p>';
     } else {
       html += sorted.map(function (o) {
         return '<a class="order-list-row" href="' + orderHref(o) + '">' +
@@ -960,8 +1245,10 @@
   }
 
   // What to pick for one order line, with where it's currently stocked.
-  function orderLineHtml(ln) {
+  function orderLineHtml(ln, order) {
     var part = getPart(ln.partId);
+    var picked = ln.picked || 0;
+    var remaining = ln.quantity - picked;
     var locs = part ? locationsForPart(part.id) : [];
     var onHand = locs.reduce(function (sum, r) { return sum + r.quantity; }, 0);
     var locHtml;
@@ -971,7 +1258,7 @@
       locHtml = '<div class="order-loc-list">' + locs.map(function (r) {
         return '<a class="order-loc" href="#/l/' + esc(r.location.code) + '">' + esc(r.location.name) + ' · ' + r.quantity + '</a>';
       }).join("") + '</div>' +
-      (onHand < ln.quantity ? '<div class="order-short">Only ' + onHand + ' on hand.</div>' : '');
+      (remaining > 0 && onHand < remaining ? '<div class="order-short">Only ' + onHand + ' on hand.</div>' : '');
     }
     return '<li class="ledger-row">' +
       (part && part.photoDataUrl ? '<img class="thumb" src="' + part.photoDataUrl + '" alt="" />' : '<div class="thumb-empty">—</div>') +
@@ -981,7 +1268,16 @@
           '<span class="qty-stencil" title="Quantity to pick">' + ln.quantity + '</span>' +
         '</div>' +
         (part && part.sku ? '<div class="ledger-sku">SKU ' + esc(part.sku) + '</div>' : '') +
-        locHtml +
+        (picked ? '<div class="hint">Picked ' + picked + ' of ' + ln.quantity + '</div>' : '') +
+        (remaining > 0 ? locHtml : '') +
+        (order && order.status === "open" && remaining > 0 ?
+          '<div class="ledger-actions no-print" style="flex-wrap:wrap;">' +
+            '<button class="btn btn-accent btn-sm" type="button" data-order-pull="' + order.id + '" data-part="' + ln.partId + '">Pull</button>' +
+            '<form data-form="orderBackorder" data-order="' + order.id + '" data-part="' + ln.partId + '">' +
+              '<input class="qty-input" type="number" name="qty" min="1" max="' + remaining + '" autocomplete="off" required /> ' +
+              '<button class="btn btn-ghost btn-sm" type="submit">Backorder</button>' +
+            '</form>' +
+          '</div>' : '') +
       '</div>' +
     '</li>';
   }
@@ -993,14 +1289,21 @@
     var html = '<div class="crumb"><a href="#/orders">Orders</a> / ' + esc(o.orderNumber) + '</div>' +
       '<div class="view-head" style="margin-bottom:0;"><h1>' + esc(o.orderNumber) + '</h1>' + statusBadge(o.status) + '</div>' +
       '<div class="order-meta"><div class="order-customer">' + esc(o.customerName) + '</div>' +
-        (o.address ? '<div class="order-address">' + esc(o.address) + '</div>' : '') + '</div>';
+        (o.address ? '<div class="order-address">' + esc(o.address) + '</div>' : '') +
+        (packagesLabel(o) ? '<div class="hint">Packages: ' + esc(packagesLabel(o)) + '</div>' : '') +
+        (o.stagingLocation ? '<div class="hint">Staging location: <a href="' + stagingHref(o.stagingLocation) + '"><strong>' + esc(o.stagingLocation) + '</strong></a></div>' : '') + '</div>';
 
     html += '<div class="section-title">Parts on this order (' + lines.length + ')</div>';
-    html += lines.length ? '<ul class="ledger">' + lines.map(orderLineHtml).join("") + '</ul>' : '<p class="empty-state">No parts on this order.</p>';
+    html += lines.length ? '<ul class="ledger">' + lines.map(function (ln) { return orderLineHtml(ln, o); }).join("") + '</ul>' :
+      '<p class="empty-state">' + (o.status === "backordered" ? 'Nothing to pick yet.' : 'No parts on this order.') + '</p>';
 
     html += '<div class="panel no-print" style="margin-top:24px; display:flex; align-items:center; justify-content:space-between; gap:14px; flex-wrap:wrap;">' +
       '<div class="barcode-box"><svg data-barcode="' + esc(o.orderNumber) + '"></svg></div>' +
-      '<a class="btn btn-accent" href="' + orderHref(o) + '/print">Print order</a>' +
+      '<div style="display:flex; gap:8px; flex-wrap:wrap;">' +
+        (o.status === "picked" ? '<button class="btn btn-accent" type="button" data-pack-order="' + esc(o.orderNumber) + '">Pack</button>' : '') +
+        (o.status === "packed" ? '<button class="btn btn-accent" type="button" data-stage-order="' + esc(o.orderNumber) + '">Stage</button>' : '') +
+        '<a class="btn btn-accent" href="' + orderHref(o) + '/print">Print order</a>' +
+      '</div>' +
     '</div>';
     return html;
   }
@@ -1098,6 +1401,8 @@
       return ref.set({ locationId: locationId, partId: partId, quantity: next, updatedAt: Date.now() }).then(function () {
         var reason = (next === current) ? ("cycle count: confirmed at " + next) : ("cycle count: " + current + " → " + next);
         logActivity(locationId, partId, next - current, reason);
+        noteInventory(locationId, partId, next);
+        if (next > current) fillBackorders();
         toast(next === current ? "Count matches — no change needed." : "Updated to " + next + ".");
         return true;
       });
@@ -1442,7 +1747,24 @@
         return true;
       }
     }
+    var stagingCode = /^ST-[A-Z0-9]{2}$/i.test(String(raw || "").trim()) ? normalizeStagingCode(raw) : null;
+    if (stagingCode) {
+      closeScanner();
+      window.location.hash = stagingHref(stagingCode);
+      toast("Opened " + stagingCode + ".");
+      return true;
+    }
     var order = getOrderByNumber(raw);
+    if (order && order.status === "picked") {
+      closeScanner();
+      openPackingModal(order);
+      return true;
+    }
+    if (order && order.status === "packed") {
+      closeScanner();
+      openStagingModal(order);
+      return true;
+    }
     if (order) {
       closeScanner();
       window.location.hash = orderHref(order);
@@ -1456,7 +1778,7 @@
       toast("Opened " + part.name + ".");
       return true;
     }
-    document.getElementById("scan-status").textContent = "No location, order or part matches that code.";
+    document.getElementById("scan-status").textContent = "No location, order, staging location or part matches that code.";
     return false;
   }
 
@@ -1649,6 +1971,32 @@
     renderFlow();
   }
 
+  // Pull for a specific order line: pulls from inventory and counts toward that line's picked total.
+  function openOrderPullFlow(orderId, partId) {
+    var order = state.orders.find(function (o) { return o.id === orderId; });
+    var line = order && (order.lines || []).find(function (l) { return l.partId === partId; });
+    if (!line) return;
+    var remaining = line.quantity - (line.picked || 0);
+    if (remaining <= 0) { toast("Nothing left to pick on that line.", true); return; }
+    var locs = locationsForPart(partId);
+    if (!locs.length) { toast("Not currently stocked anywhere to pull from — use Backorder instead.", true); return; }
+    flow = {
+      kind: "pull", partId: partId, fromId: locs[0].location.id, qty: Math.min(remaining, locs[0].quantity),
+      orderId: orderId, orderNumber: order.orderNumber, remaining: remaining,
+      backorderRest: totalForPart(partId) < remaining
+    };
+    renderFlow();
+  }
+
+  function syncFlowBackorderRow() {
+    var row = document.getElementById("flow-bo-row");
+    if (!row || !flow) return;
+    var rest = flow.remaining - (Math.round(Number(flow.qty)) || 0);
+    row.hidden = rest <= 0;
+    var label = document.getElementById("flow-bo-label");
+    if (label) label.textContent = "Backorder the remaining " + Math.max(0, rest);
+  }
+
   function renderFlow() {
     var modal = document.getElementById("flow-modal");
     if (!flow) { modal.hidden = true; return; }
@@ -1660,7 +2008,7 @@
       headEl.hidden = true;
     } else {
       headEl.hidden = false;
-      titleEl.textContent = (flow.kind === "move" ? "Move " : "Pull ") + (part ? part.name : "this part");
+      titleEl.textContent = (flow.kind === "move" ? "Move " : "Pull ") + (part ? part.name : "this part") + (flow.orderNumber ? " for " + flow.orderNumber : "");
     }
 
     var locationBoxes =
@@ -1708,6 +2056,7 @@
           (flow.kind === "move" ? '<label class="hint">To</label>' + locationBoxes : "") +
           '<label class="hint">Quantity</label>' +
           '<input type="number" id="flow-qty" min="1" value="' + flow.qty + '" />' +
+          (flow.orderId ? '<label id="flow-bo-row" class="hint" style="display:flex; align-items:center; gap:8px;"><input type="checkbox" id="flow-bo"' + (flow.backorderRest ? " checked" : "") + ' /> <span id="flow-bo-label"></span></label>' : "") +
           '<p class="flow-error" id="flow-error" hidden></p>' +
           '<button class="btn ' + (flow.kind === "move" ? "btn-accent" : "btn-accent") + '" type="button" id="flow-confirm">' +
             (flow.kind === "move" ? "Move" : "Pull") +
@@ -1732,7 +2081,10 @@
     if (fromSelect) fromSelect.addEventListener("change", function () { flow.fromId = fromSelect.value; });
 
     var qtyInput = document.getElementById("flow-qty");
-    if (qtyInput) qtyInput.addEventListener("input", function () { flow.qty = Number(qtyInput.value) || 0; });
+    if (qtyInput) qtyInput.addEventListener("input", function () { flow.qty = Number(qtyInput.value) || 0; syncFlowBackorderRow(); });
+    var boBox = document.getElementById("flow-bo");
+    if (boBox) boBox.addEventListener("change", function () { flow.backorderRest = boBox.checked; });
+    syncFlowBackorderRow();
 
     var scanBtn = document.getElementById("flow-scan");
     if (scanBtn) scanBtn.addEventListener("click", function () {
@@ -1805,8 +2157,12 @@
     }
 
     if (flow.kind === "pull") {
+      if (flow.orderId && qty > flow.remaining) { flowError("Only " + flow.remaining + " left to pick on this order."); return; }
+      var pullFlow = flow;
       applyChange(flow.fromId, flow.partId, -qty, "pull").then(function (ok) {
-        if (ok) closeFlow();
+        if (!ok) return;
+        closeFlow();
+        if (pullFlow.orderId) recordOrderPick(pullFlow.orderId, pullFlow.partId, qty, pullFlow.backorderRest && pullFlow.remaining - qty > 0);
       });
       return;
     }
@@ -1822,6 +2178,335 @@
     if (e.target.id === "cycle-modal") closeCycleModal();
   });
 
+  // ---------- packages ----------
+  // Once every part is verified, the packer says how many packages the order is going out in, by
+  // type. Saved on the order as { box, bag, other } counts.
+  var PACKAGE_TYPES = [
+    { key: "box", one: "Box", many: "Boxes" },
+    { key: "bag", one: "Bag", many: "Bags" },
+    { key: "other", one: "Other", many: "Other" }
+  ];
+  function packagesTotal(o) {
+    var pk = o && o.packages;
+    return pk ? PACKAGE_TYPES.reduce(function (n, t) { return n + (Number(pk[t.key]) || 0); }, 0) : 0;
+  }
+  function packagesLabel(o) {
+    var pk = o && o.packages;
+    if (!pk) return "";
+    return PACKAGE_TYPES.filter(function (t) { return Number(pk[t.key]) > 0; })
+      .map(function (t) { var n = Number(pk[t.key]); return n + " " + (n === 1 ? t.one : t.many); }).join(" \u00b7 ");
+  }
+
+  // ---------- packing ----------
+  // Verifies a Picked order before it ships. Scanning a Picked order opens this popup: one box per
+  // part, and the packer types what they actually counted. The expected quantity is deliberately
+  // never shown. A matching count drops that part off the list for good (saved on the order's
+  // line as `verified`); a mismatch stays, outlined in red, until it's recounted. When every
+  // part has passed, the order becomes Packed.
+  var packing = null; // { orderId, counts: { partId: "typed value" }, bad: { partId: true } }
+
+  function openPackingModal(order) {
+    if (!order) return;
+    if (order.status !== "picked") {
+      toast(order.orderNumber + " is " + orderStatusLabel(order.status) + " — it has to be Picked before it can be packed.", true);
+      return;
+    }
+    packing = { orderId: order.id, counts: {}, bad: {}, pkg: { box: "", bag: "", other: "" } };
+    renderPackModal();
+  }
+
+  function closePackingModal() {
+    packing = null;
+    document.getElementById("pack-modal").hidden = true;
+  }
+
+  function renderPackModal() {
+    var modal = document.getElementById("pack-modal");
+    var order = packing && state.orders.find(function (o) { return o.id === packing.orderId; });
+    if (!order) { modal.hidden = true; return; }
+    modal.hidden = false;
+    document.getElementById("pack-title").textContent = "Packing " + order.orderNumber;
+    var todo = (order.lines || []).filter(function (l) { return !l.verified; });
+    if (!todo.length) {
+      document.getElementById("pack-body").innerHTML =
+        '<p class="hint" style="margin:0 0 12px;">' + esc(order.customerName) + ' — every part checks out. How many packages is this order going out in?</p>' +
+        '<div class="form-grid">' + PACKAGE_TYPES.map(function (t) {
+          return '<div class="pack-row"><div class="pack-name">' + t.one + '</div>' +
+            '<input class="pack-qty" type="number" min="0" inputmode="numeric" autocomplete="off" data-pkg-type="' + t.key + '" value="' + esc(packing.pkg[t.key]) + '" /></div>';
+        }).join("") +
+        '<p class="flow-error" id="pack-error" hidden></p>' +
+        '<button class="btn btn-accent" type="button" id="pack-finish" style="width:100%;">Done packing</button></div>';
+      return;
+    }
+    document.getElementById("pack-body").innerHTML =
+      '<p class="hint" style="margin:0 0 12px;">' + esc(order.customerName) + ' — count each part and enter how many you have.</p>' +
+      todo.map(function (ln) {
+        var part = getPart(ln.partId);
+        var val = packing.counts[ln.partId];
+        return '<div class="pack-row' + (packing.bad[ln.partId] ? ' bad' : '') + '">' +
+          '<div class="pack-name">' + esc(part ? part.name : "Removed part") +
+            (part && part.sku ? '<div class="ledger-sku">SKU ' + esc(part.sku) + '</div>' : '') + '</div>' +
+          '<input class="pack-qty" type="number" min="0" inputmode="numeric" autocomplete="off" data-pack-part="' + esc(ln.partId) + '" value="' + (val == null ? "" : esc(val)) + '" />' +
+        '</div>';
+      }).join("") +
+      '<button class="btn btn-accent" type="button" id="pack-verify" style="width:100%; margin-top:6px;">Verify</button>';
+  }
+
+  function verifyPacking() {
+    var order = packing && state.orders.find(function (o) { return o.id === packing.orderId; });
+    if (!order) return;
+    var lines = (order.lines || []).map(function (l) { return Object.assign({}, l); });
+    var passed = 0, failed = 0;
+    lines.forEach(function (ln) {
+      if (ln.verified) return;
+      var raw = packing.counts[ln.partId];
+      if (raw == null || String(raw).trim() === "") return; // not counted yet — leave it alone
+      if (Math.round(Number(raw)) === ln.quantity) {
+        ln.verified = true;
+        passed++;
+        delete packing.counts[ln.partId];
+        delete packing.bad[ln.partId];
+      } else {
+        packing.bad[ln.partId] = true;
+        failed++;
+      }
+    });
+    if (!passed && !failed) { toast("Enter a count for at least one part.", true); return; }
+    if (!passed) { renderPackModal(); toast("That doesn't match — recount the highlighted parts.", true); return; }
+    saveOrderFields(order, { lines: lines }).catch(function (e) {
+      toast("Couldn't save that verification: " + e.message, true);
+    });
+    renderPackModal();
+    if (failed) toast("Recount the highlighted parts.", true);
+  }
+
+  // Last step of packing: record the packages, mark the order Packed, and hand it to Staging.
+  function finishPacking() {
+    var order = packing && state.orders.find(function (o) { return o.id === packing.orderId; });
+    if (!order) return;
+    var pk = {}, total = 0, bad = false;
+    PACKAGE_TYPES.forEach(function (t) {
+      var raw = String(packing.pkg[t.key] == null ? "" : packing.pkg[t.key]).trim();
+      var n = raw === "" ? 0 : Number(raw);
+      if (isNaN(n) || n < 0 || Math.round(n) !== n) bad = true;
+      pk[t.key] = n;
+      total += n;
+    });
+    if (bad || total < 1) {
+      var err = document.getElementById("pack-error");
+      err.textContent = bad ? "Package counts need to be whole numbers." : "Enter at least one package.";
+      err.hidden = false;
+      return;
+    }
+    saveOrderFields(order, { packages: pk, status: "packed" }).then(function () {
+      closePackingModal();
+      openStagingModal(order);
+    }).catch(function (e) {
+      toast("Couldn't save the packages: " + e.message, true);
+    });
+  }
+
+  document.getElementById("pack-close").addEventListener("click", closePackingModal);
+  document.getElementById("pack-modal").addEventListener("click", function (e) {
+    if (e.target.id === "pack-modal") closePackingModal();
+  });
+  document.getElementById("pack-body").addEventListener("input", function (e) {
+    var partId = e.target.dataset && e.target.dataset.packPart;
+    if (partId && packing) packing.counts[partId] = e.target.value;
+    var pkgType = e.target.dataset && e.target.dataset.pkgType;
+    if (pkgType && packing) packing.pkg[pkgType] = e.target.value;
+  });
+  document.getElementById("pack-body").addEventListener("click", function (e) {
+    if (e.target.id === "pack-verify") verifyPacking();
+    if (e.target.id === "pack-finish") finishPacking();
+  });
+  document.getElementById("pack-body").addEventListener("keydown", function (e) {
+    if (e.key !== "Enter" || !e.target.dataset) return;
+    if (e.target.dataset.packPart) { e.preventDefault(); verifyPacking(); }
+    else if (e.target.dataset.pkgType) { e.preventDefault(); finishPacking(); }
+  });
+
+  // ---------- staging ----------
+  // After an order passes packing it's Packed. Shipping prep happens outside the app for now; here
+  // the packer puts the finished order in a staging location (ST-XX) to wait for pickup, which
+  // moves it to Staging. Shown automatically after the last part is verified, or by scanning /
+  // choosing a Packed order.
+  var staging = null; // { orderId, code }
+
+  function openStagingModal(order) {
+    if (!order) return;
+    if (order.status !== "packed") {
+      toast(order.orderNumber + " is " + orderStatusLabel(order.status) + " — it has to be Packed before it can be staged.", true);
+      return;
+    }
+    staging = { orderId: order.id, code: "" };
+    renderStagingModal();
+  }
+
+  function closeStagingModal() {
+    staging = null;
+    document.getElementById("staging-modal").hidden = true;
+  }
+
+  function renderStagingModal() {
+    var modal = document.getElementById("staging-modal");
+    var order = staging && state.orders.find(function (o) { return o.id === staging.orderId; });
+    if (!order) { modal.hidden = true; return; }
+    modal.hidden = false;
+    document.getElementById("staging-title").textContent = "Staging " + order.orderNumber;
+    document.getElementById("staging-body").innerHTML =
+      '<div class="order-meta" style="margin-top:0;"><div class="order-customer">' + esc(order.customerName) + '</div>' +
+        (order.address ? '<div class="order-address">' + esc(order.address) + '</div>' : '') +
+        (packagesLabel(order) ? '<div class="hint">Packages: ' + esc(packagesLabel(order)) + '</div>' : '') + '</div>' +
+      '<p class="hint" style="margin:0 0 12px;">Finish prepping this order for shipping, then put it in a staging location.</p>' +
+      '<div class="form-grid">' +
+        '<label class="hint">Staging location</label>' +
+        '<div class="staging-loc">ST-<input type="text" id="staging-code" maxlength="2" placeholder="XX" autocomplete="off" autocapitalize="characters" value="' + esc(staging.code) + '" /></div>' +
+        '<p class="flow-error" id="staging-error" hidden></p>' +
+        '<button class="btn btn-accent" type="button" id="staging-confirm">Stage order</button>' +
+      '</div>';
+    var input = document.getElementById("staging-code");
+    if (input) input.focus();
+  }
+
+  function submitStaging() {
+    var order = staging && state.orders.find(function (o) { return o.id === staging.orderId; });
+    if (!order) return;
+    var code = String(staging.code || "").trim().toUpperCase();
+    if (!/^[A-Z0-9]{2}$/.test(code)) {
+      var err = document.getElementById("staging-error");
+      err.textContent = "A staging location is ST- followed by 2 characters (e.g. ST-04).";
+      err.hidden = false;
+      return;
+    }
+    var stagedAt = "ST-" + code;
+    saveOrderFields(order, { status: "staging", stagingLocation: stagedAt }).catch(function (e) {
+      toast("Couldn't save the staging location: " + e.message, true);
+    });
+    closeStagingModal();
+    toast(order.orderNumber + " staged at " + stagedAt + ".");
+  }
+
+  document.getElementById("staging-close").addEventListener("click", closeStagingModal);
+  document.getElementById("staging-modal").addEventListener("click", function (e) {
+    if (e.target.id === "staging-modal") closeStagingModal();
+  });
+  document.getElementById("staging-body").addEventListener("input", function (e) {
+    if (e.target.id === "staging-code" && staging) staging.code = e.target.value;
+  });
+  document.getElementById("staging-body").addEventListener("click", function (e) {
+    if (e.target.id === "staging-confirm") submitStaging();
+  });
+  document.getElementById("staging-body").addEventListener("keydown", function (e) {
+    if (e.key === "Enter" && e.target.id === "staging-code") { e.preventDefault(); submitStaging(); }
+  });
+
+  // ---------- closing staged orders ----------
+  // The hand-off: the packer confirms they're handing over the right packages, then everything staged
+  // at the location is Closed. They type the total package count (never shown to them); if it's
+  // wrong they're shown how many of each type should be there, then recount.
+  var closing = null; // { code, input, mismatch, step: "count" | "confirm", ids: [...] }
+
+  function openCloseModal(code) {
+    if (!ordersStagedAt(code).length) { toast("Nothing is staged at " + code + ".", true); return; }
+    closing = { code: code, input: "", mismatch: false, step: "count", ids: [] };
+    renderCloseModal();
+  }
+
+  function closeCloseModal() {
+    closing = null;
+    document.getElementById("close-modal").hidden = true;
+  }
+
+  function renderCloseModal() {
+    var modal = document.getElementById("close-modal");
+    if (!closing) { modal.hidden = true; return; }
+    var here = ordersStagedAt(closing.code);
+    if (!here.length) { closeCloseModal(); return; }
+    modal.hidden = false;
+    document.getElementById("close-title").textContent = "Close orders at " + closing.code;
+    var body = document.getElementById("close-body");
+
+    if (closing.step === "count") {
+      var expected = packageTotalsFor(here);
+      body.innerHTML =
+        '<p class="hint" style="margin:0 0 12px;">Total number of packages:</p>' +
+        '<div class="form-grid">' +
+          '<input type="number" id="close-count" min="0" inputmode="numeric" autocomplete="off" placeholder="Total packages" value="' + esc(closing.input) + '" />' +
+          (closing.mismatch ?
+            '<div class="msg-banner" style="margin:0;">Reverify package quantity at ' + esc(closing.code) + '.' +
+              PACKAGE_TYPES.filter(function (t) { return expected[t.key] > 0; }).map(function (t) {
+                var n = expected[t.key];
+                return '<div>' + n + ' ' + (n === 1 ? t.one : t.many).toLowerCase() + '</div>';
+              }).join("") + '</div>' : '') +
+          '<button class="btn btn-accent" type="button" id="close-check">Confirm count</button>' +
+        '</div>';
+      var input = document.getElementById("close-count");
+      if (input) input.focus();
+    } else {
+      var ids = closing.ids;
+      var list = here.filter(function (o) { return ids.indexOf(o.id) !== -1; });
+      body.innerHTML =
+        '<p style="margin:0 0 12px;">Package count verified. Close ' + (list.length === 1 ? 'the order' : 'all orders') + ' at <strong>' + esc(closing.code) + '</strong>? The following ' + (list.length === 1 ? 'order will' : 'orders will') + ' be closed:</p>' +
+        '<ul class="ledger" style="margin-bottom:14px;">' + list.map(function (o) {
+          return '<li class="ledger-row" style="padding:8px 4px;"><div class="ledger-main"><span class="ledger-name">' + esc(o.orderNumber) + '</span>' +
+            '<div class="hint">' + esc(o.customerName || "") + '</div></div></li>';
+        }).join("") + '</ul>' +
+        '<div class="form-row">' +
+          '<button class="btn btn-ghost" type="button" id="close-back">Back</button>' +
+          '<button class="btn btn-accent" type="button" id="close-confirm">Close orders</button>' +
+        '</div>';
+    }
+  }
+
+  function checkCloseCount() {
+    if (!closing) return;
+    var here = ordersStagedAt(closing.code);
+    var total = PACKAGE_TYPES.reduce(function (n, t) { return n + packageTotalsFor(here)[t.key]; }, 0);
+    var raw = String(closing.input || "").trim();
+    if (raw === "") { toast("Enter the total number of packages.", true); return; }
+    if (Math.round(Number(raw)) !== total) {
+      closing.mismatch = true;
+      renderCloseModal();
+      return;
+    }
+    closing.mismatch = false;
+    closing.step = "confirm";
+    closing.ids = here.map(function (o) { return o.id; });
+    renderCloseModal();
+  }
+
+  function confirmCloseOrders() {
+    if (!closing) return;
+    var code = closing.code;
+    var targets = ordersStagedAt(code).filter(function (o) { return closing.ids.indexOf(o.id) !== -1; });
+    if (!targets.length) { closeCloseModal(); return; }
+    Promise.all(targets.map(function (o) {
+      return saveOrderFields(o, { status: "closed" }).then(function () { return true; }, function () { return false; });
+    })).then(function (results) {
+      var done = results.filter(Boolean).length;
+      closeCloseModal();
+      if (done === targets.length) toast(done + " order" + (done === 1 ? "" : "s") + " closed.");
+      else toast("Only " + done + " of " + targets.length + " orders closed — try the rest again.", true);
+    });
+  }
+
+  document.getElementById("close-close").addEventListener("click", closeCloseModal);
+  document.getElementById("close-modal").addEventListener("click", function (e) {
+    if (e.target.id === "close-modal") closeCloseModal();
+  });
+  document.getElementById("close-body").addEventListener("input", function (e) {
+    if (e.target.id === "close-count" && closing) closing.input = e.target.value;
+  });
+  document.getElementById("close-body").addEventListener("click", function (e) {
+    if (e.target.id === "close-check") checkCloseCount();
+    else if (e.target.id === "close-back") { closing.step = "count"; closing.mismatch = false; renderCloseModal(); }
+    else if (e.target.id === "close-confirm") confirmCloseOrders();
+  });
+  document.getElementById("close-body").addEventListener("keydown", function (e) {
+    if (e.key === "Enter" && e.target.id === "close-count") { e.preventDefault(); checkCloseCount(); }
+  });
+
   // ---------- event delegation ----------
   document.getElementById("view").addEventListener("submit", function (e) {
     var form = e.target.closest("form[data-form]");
@@ -1832,6 +2517,32 @@
 
     if (kind === "partSearch") {
       window.location.hash = "#/parts?q=" + encodeURIComponent(fd.get("q") || "");
+      return;
+    }
+    if (kind === "orderBackorder") {
+      var boOrder = state.orders.find(function (o) { return o.id === form.dataset.order; });
+      var boLine = boOrder && (boOrder.lines || []).find(function (l) { return l.partId === form.dataset.part; });
+      var boQty = Math.round(Number(fd.get("qty")));
+      if (!boLine || !boQty || boQty <= 0) return;
+      var boRemaining = boLine.quantity - (boLine.picked || 0);
+      if (boQty > boRemaining) { toast("Only " + boRemaining + " left to pick on that line.", true); return; }
+      backorderOrderLine(boOrder, form.dataset.part, boQty).then(function () {
+        toast("Backordered " + boQty + ".");
+      });
+      return;
+    }
+    if (kind === "stagingSearch") {
+      var stCode = normalizeStagingCode(fd.get("code"));
+      if (!stCode) { toast("A staging location is ST- followed by 2 characters (e.g. ST-04).", true); return; }
+      window.location.hash = stagingHref(stCode);
+      return;
+    }
+    if (kind === "packOrder") {
+      var pq = (fd.get("q") || "").trim();
+      if (!pq) return;
+      var packTarget = getOrderByNumber(pq, true);
+      if (!packTarget) { toast("No order matches \"" + pq + "\".", true); return; }
+      openPackingModal(packTarget);
       return;
     }
     if (kind === "orderSearch") {
@@ -1934,6 +2645,14 @@
       openPullFlow(pullBtn.dataset.pull, qty);
       return;
     }
+    var closeOrdersBtn = e.target.closest("[data-close-orders]");
+    if (closeOrdersBtn) { openCloseModal(closeOrdersBtn.dataset.closeOrders); return; }
+    var stageBtn = e.target.closest("[data-stage-order]");
+    if (stageBtn) { openStagingModal(getOrderByNumber(stageBtn.dataset.stageOrder)); return; }
+    var packBtn = e.target.closest("[data-pack-order]");
+    if (packBtn) { openPackingModal(getOrderByNumber(packBtn.dataset.packOrder)); return; }
+    var orderPullBtn = e.target.closest("[data-order-pull]");
+    if (orderPullBtn) { openOrderPullFlow(orderPullBtn.dataset.orderPull, orderPullBtn.dataset.part); return; }
     if (e.target.closest("[data-draft-add]")) {
       var dPart = document.getElementById("draft-part");
       var dQty = document.getElementById("draft-qty");
@@ -1994,6 +2713,12 @@
   document.getElementById("view").addEventListener("input", function (e) {
     var field = e.target.dataset && e.target.dataset.draft;
     if (field) orderDraft[field] = e.target.value;
+  });
+
+  document.getElementById("view").addEventListener("change", function (e) {
+    if (e.target.matches && e.target.matches("select[data-order-filter]")) {
+      window.location.hash = "#/orders" + (e.target.value ? "?status=" + encodeURIComponent(e.target.value) : "");
+    }
   });
 
   window.addEventListener("hashchange", render);

@@ -47,13 +47,24 @@ create table if not exists orders (
   order_number text unique not null,
   customer_name text not null,
   address text,
-  -- open | picked | packed | staging | closed | cancelled
+  -- open | backordered | picked | packed | staging | closed | cancelled
   status text not null default 'open',
   -- [{ "partId": "<parts.id>", "quantity": 3 }, ...]
   lines jsonb not null default '[]'::jsonb,
+  -- for a backorder (<order_number>.<n>), the order_number it was split from
+  parent_order text,
+  -- how it's going out, set at the end of packing: { "box": 2, "bag": 1, "other": 0 }
+  packages jsonb,
+  -- where a Staging order is waiting for pickup, e.g. ST-04
+  staging_location text,
   created_at bigint,
   updated_at bigint
 );
+
+-- Migration for an orders table created before backorders existed.
+alter table orders add column if not exists parent_order text;
+alter table orders add column if not exists staging_location text;
+alter table orders add column if not exists packages jsonb;
 
 alter table locations enable row level security;
 alter table parts enable row level security;
