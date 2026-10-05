@@ -2,6 +2,7 @@
 <title>Clean Inventory</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600;700&display=swap">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jsbarcode/3.11.6/JsBarcode.all.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.116.0/dist/umd/supabase.js"></script>
 <style>
   :root {
@@ -231,6 +232,31 @@
 
   .empty-state { color: var(--muted); font-size: 0.92em; padding: 18px 4px; }
 
+  .status-badge {
+    display: inline-block; padding: 0.2em 0.7em; border-radius: 999px; border: 1.5px solid currentColor;
+    font-family: var(--font-mono); font-size: 0.78em; font-weight: 700; letter-spacing: 0.06em;
+    text-transform: uppercase; white-space: nowrap;
+  }
+  .status-open { color: var(--accent); }
+  .status-picked, .status-packed, .status-staging { color: var(--ink); }
+  .status-closed { color: var(--good); }
+  .status-cancelled { color: var(--danger); }
+  .order-meta { margin: 6px 0 18px; }
+  .order-meta .order-customer { font-size: 1.1em; font-weight: 600; }
+  .order-meta .order-address { color: var(--muted); white-space: pre-line; }
+  .order-loc-list { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+  .order-loc {
+    font-family: var(--font-mono); font-size: 0.82em; font-weight: 600; text-decoration: none;
+    padding: 0.15em 0.55em; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-2);
+  }
+  a.order-loc:hover { border-color: var(--accent); }
+  .order-short { color: var(--danger); font-size: 0.82em; margin-top: 4px; }
+  .barcode-box { display: inline-block; background: #fff; padding: 8px 12px; border-radius: var(--radius-sm); border: 1px solid var(--line); }
+  .barcode-box svg { display: block; max-width: 100%; height: auto; }
+  .order-list-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 12px 4px; border-bottom: 1px solid var(--line); text-decoration: none; }
+  .order-list-row:first-child { border-top: 1px solid var(--line); }
+  .order-list-row:hover .ledger-name { text-decoration: underline; }
+
   .toast-wrap { position: fixed; bottom: 76px; left: 50%; transform: translateX(-50%); z-index: 50; display: flex; flex-direction: column; gap: 8px; align-items: center; }
   .toast {
     background: var(--ink); color: var(--bg); padding: 10px 16px; border-radius: var(--radius-sm);
@@ -323,6 +349,7 @@
       <a href="#/" class="wordmark"><span class="dot"></span>Clean Inventory</a>
       <nav class="main-nav" id="main-nav">
         <a href="#/parts" data-route="parts">Parts</a>
+        <a href="#/orders" data-route="orders">Orders</a>
         <a href="#/locations" data-route="locations">Setup</a>
       </nav>
     </div>
@@ -408,7 +435,8 @@
     locations: [],
     parts: [],
     inventory: [],
-    ready: { locations: false, parts: false, inventory: false }
+    orders: [],
+    ready: { locations: false, parts: false, inventory: false, orders: false }
   };
 
   // ---------- Supabase config (same reasoning — must precede the early unlock check) ----------
@@ -418,7 +446,8 @@
   var SUPABASE_FIELDS = {
     locations: { code: "code", name: "name", section: "section", aisle: "aisle", bay: "bay", shelf: "shelf", notes: "notes", createdAt: "created_at", recentActivity: "recent_activity" },
     parts: { name: "name", sku: "sku", description: "description", photoDataUrl: "photo_data_url", createdAt: "created_at", recentActivity: "recent_activity" },
-    inventory: { locationId: "location_id", partId: "part_id", quantity: "quantity", updatedAt: "updated_at" }
+    inventory: { locationId: "location_id", partId: "part_id", quantity: "quantity", updatedAt: "updated_at" },
+    orders: { orderNumber: "order_number", customerName: "customer_name", address: "address", status: "status", lines: "lines", createdAt: "created_at", updatedAt: "updated_at" }
   };
 
   // ---------- passcode gate ----------
@@ -456,7 +485,7 @@
   // (Gate markup/logic above is left in place so it's easy to re-enable.)
   showApp();
 
-  function isReady() { return state.ready.locations && state.ready.parts && state.ready.inventory; }
+  function isReady() { return state.ready.locations && state.ready.parts && state.ready.inventory && state.ready.orders; }
 
   function toast(msg, isErr) {
     var wrap = document.getElementById("toasts");
@@ -683,10 +712,76 @@
     });
   }
 
+  // ---------- orders ----------
+  // An order is a pick request: who it's for, and which parts (and how many) to send them.
+  // Lines are { partId, quantity } and live on the order itself; where each part currently
+  // sits is looked up from live inventory, never stored, so it can't go stale.
+  var ORDER_STATUSES = [
+    { key: "open", label: "Open" },
+    { key: "picked", label: "Picked" },
+    { key: "packed", label: "Packed" },
+    { key: "staging", label: "Staging" },
+    { key: "closed", label: "Closed" },
+    { key: "cancelled", label: "Cancelled" }
+  ];
+  var ORDER_PREFIX = "SO-"; // the hyphen keeps order barcodes from ever being mistaken for a location code
+  var orderDraft = { orderNumber: null, customerName: "", address: "", lines: [] };
+
+  function orderStatusLabel(key) {
+    var st = ORDER_STATUSES.find(function (x) { return x.key === key; });
+    return st ? st.label : "Open";
+  }
+  function statusBadge(key) {
+    return '<span class="status-badge status-' + esc(key || "open") + '">' + esc(orderStatusLabel(key)) + '</span>';
+  }
+
+  // loose = also accept just the digits ("1001" -> "SO-1001"); only for typed lookups, never scans.
+  function getOrderByNumber(num, loose) {
+    var n = (num || "").trim().toLowerCase();
+    if (!n) return null;
+    var found = state.orders.find(function (o) { return (o.orderNumber || "").toLowerCase() === n; });
+    if (!found && loose && /^\d+$/.test(n)) {
+      found = state.orders.find(function (o) { return (o.orderNumber || "").toLowerCase() === ORDER_PREFIX.toLowerCase() + n; });
+    }
+    return found || null;
+  }
+
+  function nextOrderNumber() {
+    var max = 1000;
+    state.orders.forEach(function (o) {
+      var m = /^SO-(\d+)$/i.exec(o.orderNumber || "");
+      if (m) max = Math.max(max, Number(m[1]));
+    });
+    return ORDER_PREFIX + (max + 1);
+  }
+
+  function createOrder(number, customerName, address, lines) {
+    if (!number) { toast("An order needs an order number.", true); return Promise.resolve(null); }
+    if (!customerName) { toast("An order needs a customer name.", true); return Promise.resolve(null); }
+    if (!lines.length) { toast("Add at least one part to the order.", true); return Promise.resolve(null); }
+    if (getOrderByNumber(number)) {
+      toast("Order " + number + " already exists.", true);
+      return Promise.resolve(null);
+    }
+    var now = Date.now();
+    return db.collection("orders").add({
+      orderNumber: number, customerName: customerName, address: address || null,
+      status: "open", lines: lines, createdAt: now, updatedAt: now
+    }).then(function () {
+      toast("Order " + number + " created.");
+      return number;
+    }).catch(function (e) {
+      toast("Couldn't create that order: " + e.message, true);
+      return null;
+    });
+  }
+
   // ---------- routing ----------
   function currentRoute() {
     var h = window.location.hash.replace(/^#\/?/, "");
-    return h.split("/").filter(Boolean);
+    return h.split("?")[0].split("/").filter(Boolean).map(function (seg) {
+      try { return decodeURIComponent(seg); } catch (e) { return seg; }
+    });
   }
 
   function render() {
@@ -707,7 +802,10 @@
     }
 
     var view = document.getElementById("view");
-    if (route[0] === "l" && route[1] && route[2] === "print") view.innerHTML = renderLocationPrint(route[1]);
+    if (route[0] === "o" && route[1] && route[2] === "print") view.innerHTML = renderOrderPrint(route[1]);
+    else if (route[0] === "o" && route[1]) view.innerHTML = renderOrder(route[1]);
+    else if (route[0] === "orders") view.innerHTML = renderOrders();
+    else if (route[0] === "l" && route[1] && route[2] === "print") view.innerHTML = renderLocationPrint(route[1]);
     else if (route[0] === "l" && route[1]) view.innerHTML = renderLocation(route[1]);
     else if (route[0] === "locations" && route[1] === "print") view.innerHTML = renderPrintLabels();
     else if (route[0] === "locations") view.innerHTML = renderLocations();
@@ -716,6 +814,7 @@
     else view.innerHTML = renderHome();
 
     renderQRCodes();
+    renderBarcodes();
     document.querySelectorAll("input[data-photo]").forEach(wirePhotoInput);
     var autoFocusEl = view.querySelector("[data-autofocus]");
     if (autoFocusEl) autoFocusEl.focus();
@@ -745,6 +844,18 @@
     });
   }
 
+  function renderBarcodes() {
+    document.querySelectorAll("[data-barcode]").forEach(function (el) {
+      var value = el.dataset.barcode;
+      try {
+        if (typeof JsBarcode === "undefined") throw new Error("JsBarcode library not loaded");
+        JsBarcode(el, value, { format: "CODE128", displayValue: true, height: 56, margin: 0, fontSize: 16 });
+      } catch (e) {
+        el.outerHTML = '<span style="font-family:var(--font-mono); font-weight:700;">' + esc(value) + '</span>';
+      }
+    });
+  }
+
   // ---------- view: home ----------
   // One tile per core function. Add new features here as they're built.
   function renderHome() {
@@ -755,6 +866,10 @@
           '<input type="text" name="q" placeholder="Search by name, SKU, or description" />' +
           '<button class="btn btn-accent" type="submit" style="flex:0 0 auto;">Search</button>' +
         '</form>' +
+      '</div>' +
+      '<div class="panel" style="margin-bottom:22px;">' +
+        '<div class="section-title" style="margin-top:0;">Find order</div>' +
+        renderOrderSearchForm() +
       '</div>' +
       '<div class="panel" style="margin-bottom:22px;">' +
         '<div class="section-title" style="margin-top:0;">Find location</div>' +
@@ -772,6 +887,143 @@
         '</form>' +
       '</div>' +
       renderCycleCountBox();
+  }
+
+  // ---------- view: orders ----------
+  function renderOrderSearchForm() {
+    return '<form class="form-row" data-form="orderSearch">' +
+      '<input type="text" name="q" placeholder="Order number (e.g. ' + ORDER_PREFIX + '1001)" autocomplete="off" />' +
+      '<button class="btn btn-accent" type="submit" style="flex:0 0 auto;">Find</button>' +
+    '</form>';
+  }
+
+  function orderHref(o) { return '#/o/' + encodeURIComponent(o.orderNumber); }
+
+  function renderOrders() {
+    var d = orderDraft;
+    var sorted = state.orders.slice().sort(function (a, b) { return (b.createdAt || 0) - (a.createdAt || 0); });
+    var parts = state.parts.slice().sort(function (a, b) { return a.name.localeCompare(b.name); });
+
+    var html = '<div class="view-head"><h1>Orders</h1></div>' +
+      '<div class="panel" style="margin-bottom:22px;">' +
+        '<div class="section-title" style="margin-top:0;">Find order</div>' + renderOrderSearchForm() +
+      '</div>';
+
+    html += '<div class="panel" style="margin-bottom:22px;">' +
+      '<div class="section-title" style="margin-top:0;">New order</div>' +
+      '<form class="form-grid" data-form="createOrder">' +
+        '<div class="form-row">' +
+          '<input type="text" name="orderNumber" data-draft="orderNumber" value="' + esc(d.orderNumber != null ? d.orderNumber : nextOrderNumber()) + '" placeholder="Order number" autocomplete="off" required />' +
+          '<input type="text" name="customerName" data-draft="customerName" value="' + esc(d.customerName) + '" placeholder="Customer name" autocomplete="off" required />' +
+        '</div>' +
+        '<textarea name="address" data-draft="address" rows="2" placeholder="Shipping address">' + esc(d.address) + '</textarea>';
+
+    if (d.lines.length) {
+      html += '<ul class="ledger">' + d.lines.map(function (ln, i) {
+        var part = getPart(ln.partId);
+        return '<li class="ledger-row">' +
+          '<div class="ledger-main"><span class="ledger-name">' + esc(part ? part.name : "Removed part") + '</span>' +
+            (part && part.sku ? '<div class="ledger-sku">SKU ' + esc(part.sku) + '</div>' : '') + '</div>' +
+          '<span class="qty-stencil">' + ln.quantity + '</span>' +
+          '<button class="btn btn-danger btn-sm" type="button" data-draft-remove="' + i + '">Remove</button>' +
+        '</li>';
+      }).join("") + '</ul>';
+    }
+
+    if (!parts.length) {
+      html += '<p class="hint">Add some parts to the catalog before creating an order.</p>';
+    } else {
+      html += '<div class="form-row">' +
+        '<select id="draft-part"><option value="">Choose a part…</option>' +
+          parts.map(function (p) { return '<option value="' + p.id + '">' + esc(p.name) + (p.sku ? ' (' + esc(p.sku) + ')' : '') + '</option>'; }).join("") +
+        '</select>' +
+        '<input type="number" id="draft-qty" min="1" autocomplete="off" placeholder="Qty" style="max-width:6em; min-width:5em;" />' +
+        '<button class="btn btn-accent" type="button" data-draft-add style="flex:0 0 auto;">Add part</button>' +
+      '</div>';
+    }
+    html += '<button class="btn btn-accent" type="submit" style="justify-self:start;">Create order</button>' +
+      '</form></div>';
+
+    html += '<div class="section-title">All orders (' + sorted.length + ')</div>';
+    if (!sorted.length) {
+      html += '<p class="empty-state">No orders yet.</p>';
+    } else {
+      html += sorted.map(function (o) {
+        return '<a class="order-list-row" href="' + orderHref(o) + '">' +
+          '<div style="min-width:0;"><span class="ledger-name">' + esc(o.orderNumber) + '</span>' +
+            '<div class="hint">' + esc(o.customerName || "") + ' · ' + (o.lines || []).length + ' line' + ((o.lines || []).length === 1 ? '' : 's') + '</div></div>' +
+          statusBadge(o.status) +
+        '</a>';
+      }).join("");
+    }
+    return html;
+  }
+
+  // What to pick for one order line, with where it's currently stocked.
+  function orderLineHtml(ln) {
+    var part = getPart(ln.partId);
+    var locs = part ? locationsForPart(part.id) : [];
+    var onHand = locs.reduce(function (sum, r) { return sum + r.quantity; }, 0);
+    var locHtml;
+    if (!part) locHtml = '<div class="order-short">This part has been removed from the catalog.</div>';
+    else if (!locs.length) locHtml = '<div class="order-short">Not stocked at any location.</div>';
+    else {
+      locHtml = '<div class="order-loc-list">' + locs.map(function (r) {
+        return '<a class="order-loc" href="#/l/' + esc(r.location.code) + '">' + esc(r.location.name) + ' · ' + r.quantity + '</a>';
+      }).join("") + '</div>' +
+      (onHand < ln.quantity ? '<div class="order-short">Only ' + onHand + ' on hand.</div>' : '');
+    }
+    return '<li class="ledger-row">' +
+      (part && part.photoDataUrl ? '<img class="thumb" src="' + part.photoDataUrl + '" alt="" />' : '<div class="thumb-empty">—</div>') +
+      '<div class="ledger-main">' +
+        '<div class="ledger-title-row">' +
+          (part ? '<a href="#/parts/' + part.id + '" class="ledger-name">' + esc(part.name) + '</a>' : '<span class="ledger-name">Removed part</span>') +
+          '<span class="qty-stencil" title="Quantity to pick">' + ln.quantity + '</span>' +
+        '</div>' +
+        (part && part.sku ? '<div class="ledger-sku">SKU ' + esc(part.sku) + '</div>' : '') +
+        locHtml +
+      '</div>' +
+    '</li>';
+  }
+
+  function renderOrder(num) {
+    var o = getOrderByNumber(num);
+    if (!o) return '<p class="empty-state">No order found for “' + esc(num) + '”.</p>';
+    var lines = o.lines || [];
+    var html = '<div class="crumb"><a href="#/orders">Orders</a> / ' + esc(o.orderNumber) + '</div>' +
+      '<div class="view-head" style="margin-bottom:0;"><h1>' + esc(o.orderNumber) + '</h1>' + statusBadge(o.status) + '</div>' +
+      '<div class="order-meta"><div class="order-customer">' + esc(o.customerName) + '</div>' +
+        (o.address ? '<div class="order-address">' + esc(o.address) + '</div>' : '') + '</div>';
+
+    html += '<div class="section-title">Parts on this order (' + lines.length + ')</div>';
+    html += lines.length ? '<ul class="ledger">' + lines.map(orderLineHtml).join("") + '</ul>' : '<p class="empty-state">No parts on this order.</p>';
+
+    html += '<div class="panel no-print" style="margin-top:24px; display:flex; align-items:center; justify-content:space-between; gap:14px; flex-wrap:wrap;">' +
+      '<div class="barcode-box"><svg data-barcode="' + esc(o.orderNumber) + '"></svg></div>' +
+      '<a class="btn btn-accent" href="' + orderHref(o) + '/print">Print order</a>' +
+    '</div>';
+    return html;
+  }
+
+  function renderOrderPrint(num) {
+    var o = getOrderByNumber(num);
+    if (!o) return '<p class="empty-state">No order found for “' + esc(num) + '”.</p>';
+    var html = '<div class="view-head no-print"><h1>Print order</h1>' +
+      '<button class="btn btn-accent" onclick="window.print()">Print</button></div>';
+    html += '<div class="barcode-box" style="margin-bottom:14px;"><svg data-barcode="' + esc(o.orderNumber) + '"></svg></div>' +
+      '<div class="view-head" style="margin-bottom:0;"><h1>' + esc(o.orderNumber) + '</h1>' + statusBadge(o.status) + '</div>' +
+      '<div class="order-meta"><div class="order-customer">' + esc(o.customerName) + '</div>' +
+        (o.address ? '<div class="order-address">' + esc(o.address) + '</div>' : '') + '</div>' +
+      '<ul class="ledger">' + (o.lines || []).map(function (ln) {
+        var part = getPart(ln.partId);
+        var locs = part ? locationsForPart(part.id) : [];
+        return '<li class="ledger-row"><div class="ledger-main">' +
+          '<div class="ledger-title-row"><span class="ledger-name">' + esc(part ? part.name : "Removed part") + '</span><span class="qty-stencil">' + ln.quantity + '</span></div>' +
+          (part && part.sku ? '<div class="ledger-sku">SKU ' + esc(part.sku) + '</div>' : '') +
+          '<div class="order-loc-list">' + (locs.length ? locs.map(function (r) { return '<span class="order-loc">' + esc(r.location.name) + ' · ' + r.quantity + '</span>'; }).join("") : '<span class="order-short">Not stocked</span>') + '</div>' +
+        '</div></li>';
+      }).join("") + '</ul>';
+    return html;
   }
 
   // ---------- view: locations / setup ----------
@@ -1190,6 +1442,13 @@
         return true;
       }
     }
+    var order = getOrderByNumber(raw);
+    if (order) {
+      closeScanner();
+      window.location.hash = orderHref(order);
+      toast("Opened order " + order.orderNumber + ".");
+      return true;
+    }
     var part = getPartBySku(raw);
     if (part) {
       closeScanner();
@@ -1197,7 +1456,7 @@
       toast("Opened " + part.name + ".");
       return true;
     }
-    document.getElementById("scan-status").textContent = "No location or part matches that code.";
+    document.getElementById("scan-status").textContent = "No location, order or part matches that code.";
     return false;
   }
 
@@ -1252,13 +1511,13 @@
     var isAny = mode === "any";
     var title = isLocation ? "Scan a location's QR code" : (isAny ? "Scan" : "Scan a barcode");
     var fallbackHint = isLocation ? "enter the location's Section-Aisle-Bay-Shelf" :
-      (isAny ? "enter the location code or UPC/part number" : "type the UPC/part number");
+      (isAny ? "enter the order number, location code or UPC/part number" : "type the UPC/part number");
     var activeStatus = isLocation ? "Point the camera at a location's QR code." :
-      (isAny ? "Point the camera at a location's QR code or a part's barcode." : "Point the camera at the barcode.");
+      (isAny ? "Point the camera at a location's QR code, an order's barcode or a part's barcode." : "Point the camera at the barcode.");
     document.getElementById("scan-title").textContent = title;
     document.getElementById("scan-manual-form").hidden = !isLocation;
     document.getElementById("barcode-manual-form").hidden = isLocation;
-    document.getElementById("barcode-manual-input").placeholder = isAny ? "Enter location code or UPC / part number" : "Enter UPC / part number";
+    document.getElementById("barcode-manual-input").placeholder = isAny ? "Enter order number, location code or UPC / part number" : "Enter UPC / part number";
     modal.hidden = false;
     status.textContent = "Loading scanner and requesting camera access…";
     if (isLocation) {
@@ -1575,6 +1834,27 @@
       window.location.hash = "#/parts?q=" + encodeURIComponent(fd.get("q") || "");
       return;
     }
+    if (kind === "orderSearch") {
+      var oq = (fd.get("q") || "").trim();
+      if (!oq) return;
+      var foundOrder = getOrderByNumber(oq, true);
+      if (foundOrder) window.location.hash = orderHref(foundOrder);
+      else toast("No order matches \"" + oq + "\".", true);
+      return;
+    }
+    if (kind === "createOrder") {
+      createOrder(
+        (fd.get("orderNumber") || "").trim(),
+        (fd.get("customerName") || "").trim(),
+        (fd.get("address") || "").trim(),
+        orderDraft.lines.slice()
+      ).then(function (number) {
+        if (!number) return;
+        orderDraft = { orderNumber: null, customerName: "", address: "", lines: [] };
+        window.location.hash = "#/o/" + encodeURIComponent(number);
+      });
+      return;
+    }
     if (kind === "createLocation") {
       var section = (fd.get("section") || "").trim();
       var aisle = (fd.get("aisle") || "").trim();
@@ -1654,6 +1934,20 @@
       openPullFlow(pullBtn.dataset.pull, qty);
       return;
     }
+    if (e.target.closest("[data-draft-add]")) {
+      var dPart = document.getElementById("draft-part");
+      var dQty = document.getElementById("draft-qty");
+      var dQtyN = Math.round(Number(dQty && dQty.value));
+      if (!dPart || !dPart.value) { toast("Choose a part to add.", true); return; }
+      if (!dQtyN || dQtyN <= 0) { toast("Enter how many to send.", true); return; }
+      var existing = orderDraft.lines.find(function (l) { return l.partId === dPart.value; });
+      if (existing) existing.quantity += dQtyN;
+      else orderDraft.lines.push({ partId: dPart.value, quantity: dQtyN });
+      render();
+      return;
+    }
+    var dRemove = e.target.closest("[data-draft-remove]");
+    if (dRemove) { orderDraft.lines.splice(Number(dRemove.dataset.draftRemove), 1); render(); return; }
     if (e.target.id === "cycle-start") { startCycleCount(); return; }
     var delLocBtn = e.target.closest("[data-delete-location]");
     if (delLocBtn) { deleteLocation(delLocBtn.dataset.deleteLocation); return; }
@@ -1695,6 +1989,13 @@
     if (idx > -1 && idx < inputs.length - 1) inputs[idx + 1].focus();
   });
 
+  // Keep the new-order form's text fields in orderDraft so a re-render (e.g. a live sync
+  // update from another device) doesn't wipe what's been typed.
+  document.getElementById("view").addEventListener("input", function (e) {
+    var field = e.target.dataset && e.target.dataset.draft;
+    if (field) orderDraft[field] = e.target.value;
+  });
+
   window.addEventListener("hashchange", render);
 
   // ---------- Supabase backend (primary data store) ----------
@@ -1708,7 +2009,8 @@
   function fromRow(table, row) {
     var map = SUPABASE_FIELDS[table], obj = {};
     for (var k in map) obj[k] = row[map[k]];
-    if (table !== "inventory" && obj.recentActivity == null) obj.recentActivity = [];
+    if (table !== "inventory" && table !== "orders" && obj.recentActivity == null) obj.recentActivity = [];
+    if (table === "orders" && !Array.isArray(obj.lines)) obj.lines = [];
     return obj;
   }
 
@@ -1924,6 +2226,12 @@
       state.ready.parts = true;
       scheduleRender();
     }, function (e) { state.ready.parts = true; toast("Parts sync error: " + e.message, true); scheduleRender(); });
+
+    db.collection("orders").onSnapshot(function (snap) {
+      state.orders = snap.docs.map(function (d) { return Object.assign({ id: d.id }, d.data()); });
+      state.ready.orders = true;
+      scheduleRender();
+    }, function (e) { state.ready.orders = true; toast("Orders sync error: " + e.message + " (has the orders table been created?)", true); scheduleRender(); });
 
     db.collection("inventory").onSnapshot(function (snap) {
       state.inventory = snap.docs.map(function (d) { return Object.assign({ id: d.id }, d.data()); });
